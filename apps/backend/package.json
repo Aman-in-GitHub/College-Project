@@ -7,8 +7,9 @@
     "db:generate": "bun x --bun drizzle-kit generate",
     "db:migrate": "bun x --bun drizzle-kit migrate",
     "db:reset": "bun src/db/reset.ts",
+    "db:seed": "bun src/db/seed.ts",
     "db:studio": "bun x --bun drizzle-kit studio",
-    "dev": "bun db:migrate && bun db:studio & bun run --hot src/index.ts"
+    "dev": "bun db:migrate && bun db:seed && bun db:studio & bun run --hot src/index.ts"
   },
   "dependencies": {
     "better-auth": "^1.6.5",

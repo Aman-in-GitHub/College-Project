@@ -4,6 +4,8 @@ import { ProgressProvider, useProgress } from "@bprogress/react";
 import { Outlet, createRootRouteWithContext, useRouterState } from "@tanstack/react-router";
 import { useEffect, useEffectEvent } from "react";
 
+import { Toaster } from "@/components/ui/sonner";
+
 export type RouterContext = {
   queryClient: QueryClient;
 };
@@ -34,6 +36,7 @@ function RootLayout() {
       <ProgressProvider color="blue" height="4px">
         <NavigationProgress />
         <Outlet />
+        <Toaster position="top-center" duration={3000} visibleToasts={3} richColors={true} />
       </ProgressProvider>
     </>
   );

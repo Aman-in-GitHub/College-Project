@@ -1,14 +1,22 @@
+import logging
 import os
 import re
 import tempfile
 from contextlib import asynccontextmanager
+from typing import Any
 
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from paddleocr import TableRecognitionPipelineV2
+from PIL import Image
 from pydantic import BaseModel
 
 ALLOWED_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".pdf"}
+
+
+logger = logging.getLogger("scan-table")
+logging.basicConfig(level=logging.INFO)
 
 
 class Column(BaseModel):
@@ -36,6 +44,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def normalize_header(name: str, index: int) -> str:
@@ -102,12 +118,14 @@ def html_to_table(html: str) -> Table | None:
         dfs = pd.read_html(html)
     except ValueError:
         return None
+    except Exception:
+        return None
 
     if not dfs:
         return None
 
     df = dfs[0].fillna("")
-    columns = []
+    columns: list[Column] = []
 
     for i, col_name in enumerate(df.columns):
         values = [str(v).strip() for v in df[col_name].tolist()]
@@ -123,14 +141,20 @@ def html_to_table(html: str) -> Table | None:
     return Table(columns=columns)
 
 
-def parse_tables(results) -> list[Table]:
+def parse_tables(results: list[Any]) -> list[Table]:
     tables: list[Table] = []
 
     for res in results:
         payload = getattr(res, "json", {}) or {}
+
         table_list = payload.get("table_res_list", [])
+        if not isinstance(table_list, list):
+            continue
 
         for table in table_list:
+            if not isinstance(table, dict):
+                continue
+
             html = table.get("pred_html", "")
             if not html:
                 continue
@@ -142,6 +166,38 @@ def parse_tables(results) -> list[Table]:
     return tables
 
 
+def upscale_image_if_needed(path: str) -> None:
+    try:
+        with Image.open(path) as img:
+            w, h = img.size
+            longest = max(w, h)
+
+            if longest < 1200:
+                if longest < 400:
+                    scale = 4
+                elif longest < 800:
+                    scale = 2
+                else:
+                    scale = 1
+
+                if scale > 1:
+                    resized = img.resize(
+                        (w * scale, h * scale),
+                        Image.Resampling.LANCZOS,
+                    )
+                    resized.save(path)
+
+                    logger.info(
+                        f"Image upscaled by factor {scale} to size {(w * scale, h * scale)}"
+                    )
+                else:
+                    logger.info("Image size is sufficient, no upscale needed")
+            else:
+                logger.info("Image size is sufficient, no upscale needed")
+    except Exception:
+        logger.warning("Image upscale skipped", exc_info=True)
+
+
 @app.get("/")
 def root():
     return {"message": "Hello World!"}
@@ -149,38 +205,57 @@ def root():
 
 @app.post("/scan-table", response_model=ScanResponse)
 async def scan_table(file: UploadFile = File(...)):
+    logger.info("Received scan-table request")
+
     if not file.filename:
+        logger.warning("Missing filename")
         raise HTTPException(status_code=400, detail="Missing filename.")
 
     suffix = os.path.splitext(file.filename)[-1].lower()
     if suffix not in ALLOWED_EXTS:
+        logger.warning(f"Unsupported file type: {suffix}")
         raise HTTPException(status_code=400, detail="Unsupported file type.")
 
     tmp_path = None
+
     try:
         content = await file.read()
         if not content:
+            logger.warning("Empty file uploaded")
             raise HTTPException(status_code=400, detail="Empty file.")
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(content)
             tmp_path = tmp.name
 
-        results = app.state.pipeline.predict(tmp_path)
+        logger.info(f"File saved to temp path: {tmp_path}")
+
+        if suffix in {".png", ".jpg", ".jpeg", ".bmp", ".webp"}:
+            logger.info("Running image upscale check")
+            upscale_image_if_needed(tmp_path)
+
+        logger.info("Running OCR pipeline")
+        results = list(app.state.pipeline.predict(tmp_path))
+
+        logger.info(f"Pipeline returned {len(results)} results")
+
         tables = parse_tables(results)
 
-        if not tables:
-            raise HTTPException(
-                status_code=422,
-                detail={"success": False, "data": {"tables": []}},
-            )
+        logger.info(f"Parsed {len(tables)} tables")
 
+        if not tables:
+            logger.info("No tables found")
+            return ScanResponse(success=False, data={"tables": []})
+
+        logger.info("Scan successful")
         return ScanResponse(success=True, data={"tables": tables})
 
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
+    except Exception:
+        logger.exception("Scan failed")
+        raise HTTPException(status_code=500, detail="Scan failed")
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
+            logger.info("Temp file cleaned up")
