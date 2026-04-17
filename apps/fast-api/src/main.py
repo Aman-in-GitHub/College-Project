@@ -12,7 +12,7 @@ from paddleocr import TableRecognitionPipelineV2
 from PIL import Image
 from pydantic import BaseModel
 
-ALLOWED_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".pdf"}
+ALLOWED_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 
 
 logger = logging.getLogger("scan-table")
