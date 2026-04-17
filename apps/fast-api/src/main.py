@@ -16,7 +16,8 @@ ALLOWED_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 
 
 logger = logging.getLogger("scan-table")
-logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("uvicorn.error")
+logger.setLevel(logging.INFO)
 
 
 class Column(BaseModel):
@@ -203,7 +204,7 @@ def root():
     return {"message": "Hello World!"}
 
 
-@app.post("/scan-table", response_model=ScanResponse)
+@app.post("/api/scan-table", response_model=ScanResponse)
 async def scan_table(file: UploadFile = File(...)):
     logger.info("Received scan-table request")
 
@@ -227,6 +228,24 @@ async def scan_table(file: UploadFile = File(...)):
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(content)
             tmp_path = tmp.name
+
+        if suffix == ".webp":
+            logger.info("Converting WEBP to PNG for compatibility")
+
+            new_path = tmp_path.replace(".webp", ".png")
+
+            try:
+                with Image.open(tmp_path) as img:
+                    img.convert("RGB").save(new_path, "PNG")
+
+                os.unlink(tmp_path)
+                tmp_path = new_path
+
+                logger.info(f"Converted WEBP → PNG: {tmp_path}")
+
+            except Exception:
+                logger.exception("WEBP conversion failed")
+                raise HTTPException(status_code=400, detail="Invalid image format")
 
         logger.info(f"File saved to temp path: {tmp_path}")
 

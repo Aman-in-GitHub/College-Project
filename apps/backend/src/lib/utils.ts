@@ -3,6 +3,43 @@ import type { Context } from "hono";
 import { getConnInfo } from "hono/bun";
 import { isIP } from "node:net";
 
+export const DB_COLUMN_TYPES = [
+  "text",
+  "integer",
+  "numeric",
+  "boolean",
+  "date",
+  "time",
+  "timestamp",
+] as const;
+
+export const PG_TYPE_BY_DB_TYPE: Record<(typeof DB_COLUMN_TYPES)[number], string> = {
+  text: "TEXT",
+  integer: "INTEGER",
+  numeric: "NUMERIC",
+  boolean: "BOOLEAN",
+  date: "DATE",
+  time: "TIME",
+  timestamp: "TIMESTAMP",
+};
+
+const RESERVED_IDENTIFIERS = new Set([
+  "select",
+  "from",
+  "where",
+  "table",
+  "user",
+  "group",
+  "order",
+  "by",
+  "insert",
+  "update",
+  "delete",
+  "drop",
+  "create",
+  "alter",
+]);
+
 function normalizeValidatedIpAddress(value: string): string | null {
   let ipAddress = value;
 
@@ -82,4 +119,53 @@ export function getClientIp(c: Context): string | null {
   }
 
   return null;
+}
+
+export function normalizeIdentifier(value: string): string | null {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  if (!normalized || normalized.length > 63) {
+    return null;
+  }
+
+  if (!/^[a-z_][a-z0-9_]*$/.test(normalized)) {
+    return null;
+  }
+
+  if (RESERVED_IDENTIFIERS.has(normalized)) {
+    return null;
+  }
+
+  return normalized;
+}
+
+export function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`;
+}
+
+export function mapFastApiType(pgType: string): (typeof DB_COLUMN_TYPES)[number] {
+  const normalized = pgType.trim().toUpperCase();
+
+  switch (normalized) {
+    case "INTEGER":
+      return "integer";
+    case "NUMERIC":
+      return "numeric";
+    case "BOOLEAN":
+      return "boolean";
+    case "DATE":
+      return "date";
+    case "TIME":
+      return "time";
+    case "TIMESTAMP":
+      return "timestamp";
+    default:
+      return "text";
+  }
 }

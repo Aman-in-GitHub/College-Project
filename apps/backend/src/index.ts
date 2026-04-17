@@ -20,6 +20,7 @@ import { logger } from "@/lib/logger";
 import { redis, redisRateLimitStoreAdapter } from "@/lib/redis";
 import { getClientIp } from "@/lib/utils";
 import { authSessionMiddleware } from "@/middlewares/auth.ts";
+import { routes } from "@/routes";
 
 const app = new Hono<AppEnv>();
 
@@ -97,6 +98,7 @@ app.onError((error, c) => {
 app.on(["POST", "GET"], "/api/auth/*", (c) => {
   return auth.handler(c.req.raw);
 });
+app.route("/", routes);
 
 app.get("/", (c) => {
   const response = {
