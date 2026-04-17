@@ -2,4 +2,15 @@
 name = "fast-api"
 version = "0.0.0"
 requires-python = ">=3.12"
-dependencies = ["fastapi[standard]>=0.136.0", "paddleocr>=3.4.1", "python-dotenv>=1.2.2"]
+dependencies = [
+  "fastapi[standard]>=0.136.0",
+  "paddleocr[all]>=3.4.1",
+  "paddlepaddle-gpu==3.2.0",
+  "python-dotenv>=1.2.2",
+]
+
+[tool.uv]
+index-strategy = "first-index"
+
+[[tool.uv.index]]
+url = "https://www.paddlepaddle.org.cn/packages/stable/cu126/"
