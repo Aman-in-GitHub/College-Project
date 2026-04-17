@@ -147,8 +147,9 @@ def parse_tables(results: list[Any]) -> list[Table]:
 
     for res in results:
         payload = getattr(res, "json", {}) or {}
+        core_payload = payload.get("res", payload) if isinstance(payload, dict) else {}
 
-        table_list = payload.get("table_res_list", [])
+        table_list = core_payload.get("table_res_list", [])
         if not isinstance(table_list, list):
             continue
 
@@ -253,8 +254,16 @@ async def scan_table(file: UploadFile = File(...)):
             logger.info("Running image upscale check")
             upscale_image_if_needed(tmp_path)
 
-        logger.info("Running OCR pipeline")
-        results = list(app.state.pipeline.predict(tmp_path))
+        logger.info("Running OCR pipeline in wired E2E mode")
+        results = list(
+            app.state.pipeline.predict(
+                tmp_path,
+                use_e2e_wired_table_rec_model=True,
+                use_e2e_wireless_table_rec_model=False,
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+            )
+        )
 
         logger.info(f"Pipeline returned {len(results)} results")
 
