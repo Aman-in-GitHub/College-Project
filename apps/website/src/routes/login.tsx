@@ -1,6 +1,5 @@
 import { useForm } from "@tanstack/react-form";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { toast } from "sonner";
 import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +15,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { authClient } from "@/lib/auth";
+import { showErrorToast, showSuccessToast } from "@/lib/utils";
 
 export const Route = createFileRoute("/login")({
   beforeLoad: async () => {
@@ -54,16 +54,12 @@ function RouteComponent() {
       });
 
       if (error) {
-        toast.error("Something went wrong!", {
-          description: error.message,
-        });
+        showErrorToast("Something went wrong!", error.message);
 
         return;
       }
 
-      toast.success("Logged in successfully!", {
-        description: `Welcome back, ${data.user.name}!`,
-      });
+      showSuccessToast("Logged in successfully!", `Welcome back, ${data.user.name}!`);
 
       navigate({ to: "/" });
     },
@@ -99,7 +95,7 @@ function RouteComponent() {
                           id={field.name}
                           name={field.name}
                           type="email"
-                          placeholder="aman@example.com"
+                          placeholder="aman@gmail.com"
                           value={field.state.value}
                           onBlur={field.handleBlur}
                           onChange={(e) => field.handleChange(e.target.value)}

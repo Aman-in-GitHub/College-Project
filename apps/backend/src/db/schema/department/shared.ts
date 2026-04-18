@@ -16,12 +16,3 @@ export const departmentRoleEnum = pgEnum("department_role", [
   "department_admin",
   "department_staff",
 ]);
-export const templateColumnTypeEnum = pgEnum("template_column_type", [
-  "text",
-  "integer",
-  "numeric",
-  "boolean",
-  "date",
-  "time",
-  "timestamp",
-]);

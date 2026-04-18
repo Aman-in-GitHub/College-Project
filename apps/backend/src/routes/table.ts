@@ -6,14 +6,9 @@ import { z } from "zod";
 import type { AppEnv } from "@/types/index.ts";
 
 import { db, postgresClient } from "@/db/index.ts";
-import { scanTableImageWithGemini } from "@/lib/table-scan";
-import {
-  DB_COLUMN_TYPES,
-  getIdentifierValidationMessage,
-  normalizeIdentifier,
-  PG_TYPE_BY_DB_TYPE,
-  quoteIdentifier,
-} from "@/lib/utils";
+import { DB_COLUMN_TYPES, PG_TYPE_BY_DB_TYPE } from "@/lib/constants.ts";
+import { scanExistingTableRowsWithGemini, scanTableImageWithGemini } from "@/lib/table-scan";
+import { getIdentifierValidationMessage, normalizeIdentifier, quoteIdentifier } from "@/lib/utils";
 import { requireDepartmentAdmin, requireDepartmentStaff } from "@/middlewares/auth.ts";
 
 const CREATE_TABLE_REQUEST_SCHEMA = z.object({
@@ -35,6 +30,7 @@ const CREATE_TABLE_REQUEST_SCHEMA = z.object({
 const TABLE_QUERY_SCHEMA = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(10),
+  search: z.string().trim().max(200).default(""),
 });
 
 const UPDATE_TABLE_ROW_SCHEMA = z.object({
@@ -158,6 +154,25 @@ function toSqlLiteral(value: string | null): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+function escapeLikePattern(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+function buildSearchWhereClause(columns: TableColumn[], search: string): string {
+  const trimmedSearch = search.trim();
+
+  if (!trimmedSearch) {
+    return "";
+  }
+
+  const searchPattern = `%${escapeLikePattern(trimmedSearch)}%`;
+  const conditions = columns.map((column) => {
+    return `COALESCE(${quoteIdentifier(column.columnName)}::text, '') ILIKE ${toSqlLiteral(searchPattern)} ESCAPE '\\'`;
+  });
+
+  return conditions.length > 0 ? `WHERE ${conditions.join(" OR ")}` : "";
+}
+
 async function getTableRowById(
   tableName: string,
   rowId: string,
@@ -184,6 +199,15 @@ function getEditableColumnMap(columns: TableColumn[]): Map<string, TableColumn> 
       .filter((column) => column.columnName !== "id")
       .map((column) => [column.columnName, column]),
   );
+}
+
+async function deleteTableRowById(tableName: string, rowId: string): Promise<boolean> {
+  const typedRowsQuery = postgresClient<{ id: string }[]>;
+  const rows = await typedRowsQuery.unsafe(
+    `DELETE FROM ${quoteTableIdentifier(tableName)} WHERE "id" = ${toSqlLiteral(rowId)} RETURNING "id"`,
+  );
+
+  return rows.length > 0;
 }
 
 function buildInsertRowsStatement(
@@ -323,19 +347,20 @@ tableRoutes.get("/api/tables/:tableName", requireDepartmentStaff, async (c) => {
     );
   }
 
-  const { page, pageSize } = parsedQuery.data;
+  const { page, pageSize, search } = parsedQuery.data;
   const offset = (page - 1) * pageSize;
   const quotedTableName = quoteTableIdentifier(normalizedDepartmentTableName);
+  const whereClause = buildSearchWhereClause(columns, search);
 
   const typedCountQuery = postgresClient<{ total: number }[]>;
   const countRows = await typedCountQuery.unsafe(
-    `SELECT COUNT(*)::int AS total FROM ${quotedTableName}`,
+    `SELECT COUNT(*)::int AS total FROM ${quotedTableName} ${whereClause}`,
   );
   const totalRows = countRows[0]?.total ?? 0;
 
   const typedRowsQuery = postgresClient<Record<string, string | number | boolean | null>[]>;
   const rows = await typedRowsQuery.unsafe(
-    `SELECT * FROM ${quotedTableName} ORDER BY "id" LIMIT ${pageSize} OFFSET ${offset}`,
+    `SELECT * FROM ${quotedTableName} ${whereClause} ORDER BY "id" LIMIT ${pageSize} OFFSET ${offset}`,
   );
 
   return c.json(
@@ -625,6 +650,213 @@ tableRoutes.post("/api/tables/:tableName/rows", requireDepartmentAdmin, async (c
       message: "Record added successfully.",
       data: {
         row: await getTableRowById(normalizedDepartmentTableName, rowId),
+      },
+    },
+    201,
+  );
+});
+
+tableRoutes.delete("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin, async (c) => {
+  const department = c.get("department");
+  const tableName = c.req.param("tableName");
+  const rowId = c.req.param("rowId");
+
+  if (!department) {
+    return c.json(
+      {
+        success: false,
+        message: "Department context is required.",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  const normalizedDepartmentTableName = buildDepartmentTableName(department.slug, tableName);
+
+  if (!normalizedDepartmentTableName) {
+    return c.json(
+      {
+        success: false,
+        message: "Invalid table name.",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  const columns = await getDepartmentTableColumns(normalizedDepartmentTableName);
+
+  if (columns.length === 0) {
+    return c.json(
+      {
+        success: false,
+        message: "Table not found.",
+        data: null,
+      },
+      404,
+    );
+  }
+
+  const isDeleted = await deleteTableRowById(normalizedDepartmentTableName, rowId);
+
+  if (!isDeleted) {
+    return c.json(
+      {
+        success: false,
+        message: "Row not found.",
+        data: null,
+      },
+      404,
+    );
+  }
+
+  return c.json(
+    {
+      success: true,
+      message: "Row deleted successfully.",
+      data: null,
+    },
+    200,
+  );
+});
+
+tableRoutes.post("/api/tables/:tableName/import-image", requireDepartmentAdmin, async (c) => {
+  const reqLogger = c.get("logger");
+  const department = c.get("department");
+  const tableName = c.req.param("tableName");
+  const body = await c.req.parseBody();
+  const maybeFile = body.file;
+  const file = Array.isArray(maybeFile) ? maybeFile[0] : maybeFile;
+
+  if (!(file instanceof File)) {
+    return c.json(
+      {
+        success: false,
+        message: "Missing file field in multipart request",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  if (!file.type.startsWith("image/")) {
+    return c.json(
+      {
+        success: false,
+        message: "Only image files are supported",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  if (!department) {
+    return c.json(
+      {
+        success: false,
+        message: "Department context is required.",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  const normalizedDepartmentTableName = buildDepartmentTableName(department.slug, tableName);
+
+  if (!normalizedDepartmentTableName) {
+    return c.json(
+      {
+        success: false,
+        message: "Invalid table name.",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  const columns = await getDepartmentTableColumns(normalizedDepartmentTableName);
+
+  if (columns.length === 0) {
+    return c.json(
+      {
+        success: false,
+        message: "Table not found.",
+        data: null,
+      },
+      404,
+    );
+  }
+
+  const editableColumns = columns.filter((column) => column.columnName !== "id");
+  const scannedRows = await scanExistingTableRowsWithGemini({
+    file,
+    logger: reqLogger,
+    tableName,
+    columns: editableColumns.map((column) => ({
+      name: column.columnName,
+      dataType: column.dataType,
+      isNullable: column.isNullable,
+    })),
+  });
+
+  if (scannedRows.length === 0) {
+    return c.json(
+      {
+        success: true,
+        message: "No matching table rows were found in the uploaded image.",
+        data: {
+          insertedRowCount: 0,
+        },
+      },
+      200,
+    );
+  }
+
+  if (
+    scannedRows.some((row) =>
+      editableColumns.some(
+        (column, columnIndex) =>
+          !column.isNullable &&
+          normalizeUpdatedCellValue(row[columnIndex] ?? "", column.dataType) === null,
+      ),
+    )
+  ) {
+    return c.json(
+      {
+        success: false,
+        message: "Required fields are missing in the imported image rows.",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  const columnIdentifiers = [
+    quoteIdentifier("id"),
+    ...editableColumns.map((column) => quoteIdentifier(column.columnName)),
+  ];
+  const rowValues = scannedRows.map((row) => {
+    return [
+      toSqlLiteral(nanoid(32)),
+      ...editableColumns.map((column, columnIndex) =>
+        toSqlLiteral(normalizeUpdatedCellValue(row[columnIndex] ?? "", column.dataType)),
+      ),
+    ];
+  });
+
+  await postgresClient.unsafe(
+    `INSERT INTO ${quoteTableIdentifier(normalizedDepartmentTableName)} (${columnIdentifiers.join(", ")}) VALUES ${rowValues
+      .map((row) => `(${row.join(", ")})`)
+      .join(", ")}`,
+  );
+
+  return c.json(
+    {
+      success: true,
+      message: `${scannedRows.length} row(s) imported successfully.`,
+      data: {
+        insertedRowCount: scannedRows.length,
       },
     },
     201,

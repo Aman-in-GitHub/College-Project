@@ -1,6 +1,9 @@
 {
   "name": "college-project",
   "private": true,
+  "workspaces": [
+    "apps/**"
+  ],
   "scripts": {
     "clean": "docker compose down && for d in .tanstack dist node_modules pnpm-lock.yaml; do find . -name \"$d\" | xargs -r rm -rf; done",
     "dev": "docker compose up -d && pnpm -r --parallel --if-present run dev",

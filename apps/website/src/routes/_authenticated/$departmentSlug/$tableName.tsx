@@ -1,8 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, getRouteApi } from "@tanstack/react-router";
-import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import { useEffectEvent, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import {
+  type ColumnDef,
+  flexRender,
+  getCoreRowModel,
+  type PaginationState,
+  useReactTable,
+} from "@tanstack/react-table";
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type ChangeEvent } from "react";
 
 import { buttonVariants, Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,8 +27,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { EXPORT_FILE_FORMATS } from "@/lib/constants";
 import { env } from "@/lib/env";
-import { fetchApiJson, isRecord } from "@/lib/utils";
+import {
+  buildExportFilename,
+  exportRecordsFile,
+  fetchApiJson,
+  isRecord,
+  showErrorToast,
+  showInfoToast,
+  showSuccessToast,
+  showWarningToast,
+  type ExportFileFormat,
+} from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/$departmentSlug/$tableName")({
   component: RouteComponent,
@@ -31,18 +47,16 @@ export const Route = createFileRoute("/_authenticated/$departmentSlug/$tableName
 
 const authenticatedRoute = getRouteApi("/_authenticated");
 
-type PaginationState = {
-  pageIndex: number;
-  pageSize: number;
-};
-
 type TableValue = string | number | boolean | null;
 
-type TableRowData = Record<string, TableValue>;
+type TableRowData = {
+  id: string;
+} & Record<string, TableValue>;
 
 type TableColumn = {
   columnName: string;
   dataType: string;
+  isNullable: boolean;
 };
 
 const EMPTY_TABLE_COLUMNS: TableColumn[] = [];
@@ -84,6 +98,20 @@ type AddRowResponse = {
   };
 };
 
+type ImportRowsResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    insertedRowCount: number;
+  };
+};
+
+type DeleteRowResponse = {
+  success: boolean;
+  message: string;
+  data: null;
+};
+
 type EditableTableCellProps = {
   canEdit: boolean;
   rowId: string;
@@ -106,6 +134,10 @@ function isTableColumn(value: unknown): value is TableColumn {
 
 function isTableRowData(value: unknown): value is TableRowData {
   if (!isRecord(value)) {
+    return false;
+  }
+
+  if (typeof value.id !== "string") {
     return false;
   }
 
@@ -141,6 +173,10 @@ function isTablePageResponse(value: unknown): value is TablePageResponse {
   );
 }
 
+function getRowValue(row: TableRowData, columnName: string): TableValue {
+  return row[columnName] ?? null;
+}
+
 function isUpdateRowResponse(value: unknown): value is UpdateRowResponse {
   return (
     isRecord(value) &&
@@ -161,12 +197,75 @@ function isAddRowResponse(value: unknown): value is AddRowResponse {
   );
 }
 
+function isImportRowsResponse(value: unknown): value is ImportRowsResponse {
+  return (
+    isRecord(value) &&
+    typeof value.success === "boolean" &&
+    typeof value.message === "string" &&
+    isRecord(value.data) &&
+    typeof value.data.insertedRowCount === "number"
+  );
+}
+
+function isDeleteRowResponse(value: unknown): value is DeleteRowResponse {
+  return (
+    isRecord(value) &&
+    typeof value.success === "boolean" &&
+    typeof value.message === "string" &&
+    value.data === null
+  );
+}
+
+function isExportFileFormat(value: string | null): value is ExportFileFormat {
+  return value !== null && EXPORT_FILE_FORMATS.some((format) => format === value);
+}
+
 function formatCellValue(value: TableValue): string {
   if (value === null) {
     return "";
   }
 
   return String(value);
+}
+
+function exportRowsToFile(params: {
+  columns: TableColumn[];
+  rows: TableRowData[];
+  filename: string;
+  format: ExportFileFormat;
+  sheetName: string;
+}): void {
+  const columnNames = params.columns.map((column) => column.columnName);
+  const exportRows = params.rows.map((row) => {
+    return columnNames.reduce<Record<string, TableValue>>((result, columnName) => {
+      result[columnName] = getRowValue(row, columnName);
+      return result;
+    }, {});
+  });
+
+  exportRecordsFile({
+    rows: exportRows,
+    headers: columnNames,
+    sheetName: params.sheetName,
+    filename: params.filename,
+    format: params.format,
+  });
+}
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedValue(value);
+    }, delayMs);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [delayMs, value]);
+
+  return debouncedValue;
 }
 
 function EditableTableCell({
@@ -195,10 +294,12 @@ async function fetchTablePage(params: {
   departmentSlug: string;
   tableName: string;
   pagination: PaginationState;
+  search: string;
 }): Promise<TablePageResponse> {
   const searchParams = new URLSearchParams({
     page: String(params.pagination.pageIndex + 1),
     pageSize: String(params.pagination.pageSize),
+    search: params.search,
   });
 
   const { response, body } = await fetchApiJson(
@@ -298,96 +399,188 @@ async function addTableRow(params: {
   return body;
 }
 
+async function importTableRowsFromImage(params: {
+  departmentSlug: string;
+  tableName: string;
+  file: File;
+}): Promise<ImportRowsResponse> {
+  const formData = new FormData();
+  formData.append("file", params.file, params.file.name);
+
+  const { response, body } = await fetchApiJson(
+    `${env.VITE_SERVER_URL}/api/tables/${encodeURIComponent(params.tableName)}/import-image`,
+    {
+      method: "POST",
+      headers: {
+        "x-department-slug": params.departmentSlug,
+      },
+      body: formData,
+    },
+  );
+
+  if (!response.ok) {
+    if (isRecord(body) && typeof body.message === "string") {
+      throw new Error(body.message);
+    }
+
+    throw new Error("Failed to import rows from image.");
+  }
+
+  if (!isImportRowsResponse(body)) {
+    throw new Error("Invalid import response.");
+  }
+
+  return body;
+}
+
+async function deleteTableRow(params: {
+  departmentSlug: string;
+  tableName: string;
+  rowId: string;
+}): Promise<DeleteRowResponse> {
+  const { response, body } = await fetchApiJson(
+    `${env.VITE_SERVER_URL}/api/tables/${encodeURIComponent(params.tableName)}/rows/${encodeURIComponent(params.rowId)}`,
+    {
+      method: "DELETE",
+      headers: {
+        "x-department-slug": params.departmentSlug,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    if (isRecord(body) && typeof body.message === "string") {
+      throw new Error(body.message);
+    }
+
+    throw new Error("Failed to delete row.");
+  }
+
+  if (!isDeleteRowResponse(body)) {
+    throw new Error("Invalid delete row response.");
+  }
+
+  return body;
+}
+
 function RouteComponent() {
   const { accessContext } = authenticatedRoute.useRouteContext();
   const params = Route.useParams();
   const queryClient = useQueryClient();
+  const tableQueryKey = ["table-page", params.departmentSlug, params.tableName] as const;
   const department = accessContext.department;
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: 10,
   });
+  const [searchTerm, setSearchTerm] = useState("");
   const [editedRows, setEditedRows] = useState<Record<string, Record<string, string | null>>>({});
   const [newRowValues, setNewRowValues] = useState<Record<string, string>>({});
+  const [selectedImportFile, setSelectedImportFile] = useState<File | null>(null);
+  const [importPreviewUrl, setImportPreviewUrl] = useState<string | null>(null);
+  const [isExportingAll, setIsExportingAll] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFileFormat>("xlsx");
+  const [deletingRowId, setDeletingRowId] = useState<string | null>(null);
+  const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
   const editedRowsRef = useRef(editedRows);
+  const importCameraInputRef = useRef<HTMLInputElement | null>(null);
+  const importUploadInputRef = useRef<HTMLInputElement | null>(null);
   editedRowsRef.current = editedRows;
 
+  useEffect(() => {
+    if (!selectedImportFile) {
+      setImportPreviewUrl(null);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(selectedImportFile);
+    setImportPreviewUrl(objectUrl);
+
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [selectedImportFile]);
+
   const tableQuery = useQuery({
-    queryKey: [
-      "table-page",
-      params.departmentSlug,
-      params.tableName,
-      pagination.pageIndex,
-      pagination.pageSize,
-    ],
+    queryKey: [...tableQueryKey, debouncedSearchTerm, pagination.pageIndex, pagination.pageSize],
     queryFn: () =>
       fetchTablePage({
         departmentSlug: params.departmentSlug,
         tableName: params.tableName,
         pagination,
+        search: debouncedSearchTerm,
       }),
   });
 
   const updateRowMutation = useMutation({
     mutationFn: updateTableRow,
     onSuccess: (payload, variables) => {
-      toast.success(payload.message);
+      showSuccessToast(payload.message);
       setEditedRows((previous) => {
         const next = { ...previous };
         delete next[variables.rowId];
         return next;
       });
       void queryClient.invalidateQueries({
-        queryKey: ["table-page", params.departmentSlug, params.tableName],
+        queryKey: tableQueryKey,
       });
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to update row.");
+      showErrorToast(error instanceof Error ? error.message : "Failed to update row.");
     },
   });
   const addRowMutation = useMutation({
     mutationFn: addTableRow,
     onSuccess: (payload) => {
-      toast.success(payload.message);
+      showSuccessToast(payload.message);
       setNewRowValues({});
-
-      if (!payload.data.row) {
-        return;
-      }
-
-      queryClient.setQueryData<TablePageResponse | undefined>(
-        [
-          "table-page",
-          params.departmentSlug,
-          params.tableName,
-          pagination.pageIndex,
-          pagination.pageSize,
-        ],
-        (previous) => {
-          if (!previous) {
-            return previous;
-          }
-
-          return {
-            ...previous,
-            data: {
-              ...previous.data,
-              rows: [...previous.data.rows, payload.data.row],
-              pagination: {
-                ...previous.data.pagination,
-                totalRows: previous.data.pagination.totalRows + 1,
-              },
-            },
-          };
-        },
-      );
-      setEditedRows((previous) => ({
-        ...previous,
-        [formatCellValue(payload.data.row.id)]: {},
-      }));
+      void queryClient.invalidateQueries({
+        queryKey: tableQueryKey,
+      });
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to add record.");
+      showErrorToast(error instanceof Error ? error.message : "Failed to add record.");
+    },
+  });
+  const importRowsMutation = useMutation({
+    mutationFn: importTableRowsFromImage,
+    onSuccess: (payload) => {
+      showSuccessToast(payload.message);
+      setSelectedImportFile(null);
+
+      if (importCameraInputRef.current) {
+        importCameraInputRef.current.value = "";
+      }
+
+      if (importUploadInputRef.current) {
+        importUploadInputRef.current.value = "";
+      }
+
+      void queryClient.invalidateQueries({
+        queryKey: tableQueryKey,
+      });
+    },
+    onError: (error) => {
+      showErrorToast(error instanceof Error ? error.message : "Failed to import rows.");
+    },
+  });
+  const deleteRowMutation = useMutation({
+    mutationFn: deleteTableRow,
+    onSuccess: (payload, variables) => {
+      showSuccessToast(payload.message);
+      setDeletingRowId((previous) => (previous === variables.rowId ? null : previous));
+      setEditedRows((previous) => {
+        const next = { ...previous };
+        delete next[variables.rowId];
+        return next;
+      });
+      void queryClient.invalidateQueries({
+        queryKey: tableQueryKey,
+      });
+    },
+    onError: (error) => {
+      setDeletingRowId(null);
+      showErrorToast(error instanceof Error ? error.message : "Failed to delete row.");
     },
   });
 
@@ -396,6 +589,7 @@ function RouteComponent() {
 
   const tableColumns = tableQuery.data?.data.columns ?? EMPTY_TABLE_COLUMNS;
   const rows = tableQuery.data?.data.rows ?? [];
+  const totalRows = tableQuery.data?.data.pagination.totalRows ?? 0;
   const editableColumns = tableColumns.filter((column) => column.columnName !== "id");
   const canAddRow = editableColumns.some(
     (column) => (newRowValues[column.columnName] ?? "").trim().length > 0,
@@ -457,57 +651,212 @@ function RouteComponent() {
     });
   }
 
-  const columns = useMemo<ColumnDef<TableRowData>[]>(() => {
-    return [
-      ...tableColumns.map((column) => ({
-        accessorKey: column.columnName,
-        header: column.columnName,
-        cell: ({ row }) => {
-          const rowId = formatCellValue(row.original.id);
-          return (
-            <EditableTableCell
-              canEdit={canEdit}
-              rowId={rowId}
-              columnName={column.columnName}
-              originalValue={row.original[column.columnName] ?? null}
-              draftValue={editedRowsRef.current[rowId]?.[column.columnName]}
-              onDraftChange={handleDraftChange}
-            />
-          );
-        },
-      })),
-      ...(canEdit
-        ? [
-            {
-              id: "actions",
-              header: "Actions",
-              cell: ({ row }) => {
-                const rowId = formatCellValue(row.original.id);
-                const rowDraft = editedRowsRef.current[rowId] ?? {};
-                const hasChanges = Object.keys(rowDraft).length > 0;
+  function handleSearchChange(event: ChangeEvent<HTMLInputElement>) {
+    const nextValue = event.target.value;
 
-                return (
+    setSearchTerm(nextValue);
+    setPagination((previous) => ({
+      ...previous,
+      pageIndex: 0,
+    }));
+  }
+
+  function handleExportCurrentPage() {
+    if (rows.length === 0) {
+      showWarningToast("No rows to export.");
+      return;
+    }
+
+    exportRowsToFile({
+      columns: tableColumns,
+      rows,
+      sheetName: params.tableName,
+      filename: buildExportFilename({
+        baseName: `${params.departmentSlug}_${params.tableName}`,
+        suffix: "page",
+        format: exportFormat,
+      }),
+      format: exportFormat,
+    });
+
+    showInfoToast("Current page exported.");
+  }
+
+  async function handleExportAll() {
+    setIsExportingAll(true);
+
+    try {
+      const exportPageSize = 100;
+      const firstPage = await fetchTablePage({
+        departmentSlug: params.departmentSlug,
+        tableName: params.tableName,
+        pagination: {
+          pageIndex: 0,
+          pageSize: exportPageSize,
+        },
+        search: debouncedSearchTerm,
+      });
+
+      const allRows = [...firstPage.data.rows];
+      const totalRows = firstPage.data.pagination.totalRows;
+      const totalPages = Math.max(Math.ceil(totalRows / exportPageSize), 1);
+
+      for (let pageIndex = 1; pageIndex < totalPages; pageIndex += 1) {
+        const page = await fetchTablePage({
+          departmentSlug: params.departmentSlug,
+          tableName: params.tableName,
+          pagination: {
+            pageIndex,
+            pageSize: exportPageSize,
+          },
+          search: debouncedSearchTerm,
+        });
+
+        allRows.push(...page.data.rows);
+      }
+
+      if (allRows.length === 0) {
+        showWarningToast("No rows to export.");
+        return;
+      }
+
+      exportRowsToFile({
+        columns: firstPage.data.columns,
+        rows: allRows,
+        sheetName: params.tableName,
+        filename: buildExportFilename({
+          baseName: `${params.departmentSlug}_${params.tableName}`,
+          suffix: "all",
+          format: exportFormat,
+        }),
+        format: exportFormat,
+      });
+
+      showInfoToast("All rows exported.");
+    } catch (error) {
+      showErrorToast(error instanceof Error ? error.message : "Failed to export all rows.");
+    } finally {
+      setIsExportingAll(false);
+    }
+  }
+
+  function handleImportFileSelect(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    const inputId = event.target.id;
+
+    setSelectedImportFile(file);
+
+    if (inputId === "table-import-camera" && importUploadInputRef.current) {
+      importUploadInputRef.current.value = "";
+    }
+
+    if (inputId === "table-import-upload" && importCameraInputRef.current) {
+      importCameraInputRef.current.value = "";
+    }
+  }
+
+  function handleClearImportSelection() {
+    setSelectedImportFile(null);
+
+    if (importCameraInputRef.current) {
+      importCameraInputRef.current.value = "";
+    }
+
+    if (importUploadInputRef.current) {
+      importUploadInputRef.current.value = "";
+    }
+  }
+
+  function handleImportRows() {
+    if (!selectedImportFile) {
+      showWarningToast("Please take or upload a photo first.");
+      return;
+    }
+
+    void importRowsMutation.mutateAsync({
+      departmentSlug: params.departmentSlug,
+      tableName: params.tableName,
+      file: selectedImportFile,
+    });
+  }
+
+  const handleDeleteRow = useEffectEvent((rowId: string) => {
+    setDeletingRowId(rowId);
+    void deleteRowMutation.mutateAsync({
+      departmentSlug: params.departmentSlug,
+      tableName: params.tableName,
+      rowId,
+    });
+  });
+
+  const columnDefs = useMemo<ColumnDef<TableRowData>[]>(() => {
+    const dataColumns: ColumnDef<TableRowData>[] = tableColumns.map((column) => ({
+      accessorKey: column.columnName,
+      header: column.columnName,
+      cell: ({ row }) => {
+        return (
+          <EditableTableCell
+            canEdit={canEdit}
+            rowId={row.original.id}
+            columnName={column.columnName}
+            originalValue={getRowValue(row.original, column.columnName)}
+            draftValue={editedRowsRef.current[row.original.id]?.[column.columnName]}
+            onDraftChange={handleDraftChange}
+          />
+        );
+      },
+    }));
+    const actionColumns: ColumnDef<TableRowData>[] = canEdit
+      ? [
+          {
+            id: "actions",
+            header: "Actions",
+            cell: ({ row }) => {
+              const rowDraft = editedRowsRef.current[row.original.id] ?? {};
+              const hasChanges = Object.keys(rowDraft).length > 0;
+              const isDeletingCurrentRow = deletingRowId === row.original.id;
+
+              return (
+                <div className="flex flex-col gap-2">
                   <Button
                     size="sm"
-                    disabled={!hasChanges || updateRowMutation.isPending}
-                    onClick={() => handleSaveRow(rowId, rowDraft)}
+                    className="w-20"
+                    disabled={!hasChanges || updateRowMutation.isPending || isDeletingCurrentRow}
+                    onClick={() => handleSaveRow(row.original.id, rowDraft)}
                   >
                     Save
                   </Button>
-                );
-              },
-            } satisfies ColumnDef<TableRowData>,
-          ]
-        : []),
-    ];
-  }, [canEdit, tableColumns, updateRowMutation.isPending]);
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="w-20"
+                    disabled={deleteRowMutation.isPending || updateRowMutation.isPending}
+                    onClick={() => handleDeleteRow(row.original.id)}
+                  >
+                    {isDeletingCurrentRow ? "Deleting..." : "Delete"}
+                  </Button>
+                </div>
+              );
+            },
+          },
+        ]
+      : [];
+
+    return [...dataColumns, ...actionColumns];
+  }, [
+    canEdit,
+    deleteRowMutation.isPending,
+    deletingRowId,
+    tableColumns,
+    updateRowMutation.isPending,
+  ]);
 
   const table = useReactTable({
     data: rows,
-    columns,
+    columns: columnDefs,
     getCoreRowModel: getCoreRowModel(),
     manualPagination: true,
-    rowCount: tableQuery.data?.data.pagination.totalRows ?? 0,
+    rowCount: totalRows,
     onPaginationChange: (updater) => {
       setPagination((previous) => (typeof updater === "function" ? updater(previous) : updater));
     },
@@ -541,6 +890,85 @@ function RouteComponent() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
+          {canEdit ? (
+            <div className="flex flex-col gap-4 border p-4">
+              <div className="flex flex-col gap-1">
+                <div className="text-sm font-medium">Import Rows From Image</div>
+                <div className="text-sm text-muted-foreground">
+                  Upload a photo of the same table format and add only row data to this table.
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="table-import-camera" className="text-sm font-medium">
+                    Take Photo
+                  </label>
+                  <Input
+                    id="table-import-camera"
+                    ref={importCameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleImportFileSelect}
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="table-import-upload" className="text-sm font-medium">
+                    Upload Photo
+                  </label>
+                  <Input
+                    id="table-import-upload"
+                    ref={importUploadInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImportFileSelect}
+                  />
+                </div>
+              </div>
+
+              {importPreviewUrl ? (
+                <img
+                  src={importPreviewUrl}
+                  alt="Selected rows import preview"
+                  className="max-h-80 w-full object-contain"
+                />
+              ) : null}
+
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Button
+                  type="button"
+                  className="w-full sm:w-auto"
+                  disabled={!selectedImportFile || importRowsMutation.isPending}
+                  onClick={handleImportRows}
+                >
+                  {importRowsMutation.isPending ? "Importing..." : "Import Rows"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                  disabled={!selectedImportFile && !importPreviewUrl}
+                  onClick={handleClearImportSelection}
+                >
+                  Clear
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="flex flex-col gap-2">
+            <label htmlFor="table-search" className="text-sm font-medium">
+              Search
+            </label>
+            <Input
+              id="table-search"
+              value={searchTerm}
+              onChange={handleSearchChange}
+              placeholder="Search across the whole table"
+            />
+          </div>
+
           {tableQuery.isLoading ? (
             <p className="text-sm text-muted-foreground">Loading table...</p>
           ) : tableQuery.isError ? (
@@ -578,7 +1006,7 @@ function RouteComponent() {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={columns.length} className="text-center">
+                      <TableCell colSpan={columnDefs.length} className="text-center">
                         No rows found.
                       </TableCell>
                     </TableRow>
@@ -603,10 +1031,11 @@ function RouteComponent() {
                       <TableCell>
                         <Button
                           size="sm"
+                          className="w-20"
                           disabled={!canAddRow || addRowMutation.isPending}
                           onClick={handleAddRow}
                         >
-                          {addRowMutation.isPending ? "Adding..." : "Add Record"}
+                          {addRowMutation.isPending ? "Adding..." : "Add"}
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -614,14 +1043,53 @@ function RouteComponent() {
                 </TableBody>
               </Table>
 
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-sm text-muted-foreground">
-                  {tableQuery.data
-                    ? `${tableQuery.data.data.pagination.totalRows} total row(s)`
-                    : "0 total row(s)"}
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="grid gap-3 lg:flex lg:items-center lg:gap-3">
+                  <div className="w-full lg:w-[140px]">
+                    <Select
+                      value={exportFormat}
+                      onValueChange={(value) => {
+                        if (isExportFileFormat(value)) {
+                          setExportFormat(value);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {EXPORT_FILE_FORMATS.map((format) => (
+                          <SelectItem key={format} value={format}>
+                            {format.toUpperCase()}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    disabled={rows.length === 0 || tableQuery.isLoading}
+                    onClick={handleExportCurrentPage}
+                  >
+                    Export Current Page
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    disabled={tableQuery.isLoading || isExportingAll}
+                    onClick={() => void handleExportAll()}
+                  >
+                    {isExportingAll ? "Exporting..." : "Export Full Table"}
+                  </Button>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between lg:justify-end">
+                  <div className="text-sm text-muted-foreground sm:mr-1">
+                    {`${totalRows} total row(s)`}
+                  </div>
                   <Select
                     value={String(pagination.pageSize)}
                     onValueChange={(value) =>
@@ -631,7 +1099,7 @@ function RouteComponent() {
                       })
                     }
                   >
-                    <SelectTrigger className="w-[120px]">
+                    <SelectTrigger className="w-full sm:w-[120px]">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -649,6 +1117,7 @@ function RouteComponent() {
 
                   <Button
                     variant="outline"
+                    className="w-full sm:w-auto"
                     disabled={!table.getCanPreviousPage() || tableQuery.isFetching}
                     onClick={() => table.previousPage()}
                   >
@@ -656,6 +1125,7 @@ function RouteComponent() {
                   </Button>
                   <Button
                     variant="outline"
+                    className="w-full sm:w-auto"
                     disabled={!table.getCanNextPage() || tableQuery.isFetching}
                     onClick={() => table.nextPage()}
                   >

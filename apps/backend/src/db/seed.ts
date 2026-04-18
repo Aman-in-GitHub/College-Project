@@ -6,7 +6,7 @@ async function seed() {
   console.log("Checking user...");
 
   const existingUser = await db.query.users.findFirst({
-    where: (table, { eq: equals }) => equals(table.email, "amanchand012@gmail.com"),
+    where: (table, { eq: equals }) => equals(table.email, "aman@gmail.com"),
     columns: {
       id: true,
       email: true,
@@ -30,7 +30,7 @@ async function seed() {
 
   const authResponse = await auth.api.signUpEmail({
     body: {
-      email: "amanchand012@gmail.com",
+      email: "aman@gmail.com",
       password: "aman1234",
       name: "Aman",
       username: "aman",

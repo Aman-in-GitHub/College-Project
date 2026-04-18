@@ -6,3 +6,28 @@ export const GLOBAL_RATE_LIMIT_WINDOW = 60_000;
 export const REDIS_RATE_LIMIT_PREFIX = "rate_limit:";
 // The model to use for table scanning with Gemini.
 export const GEMINI_TABLE_SCAN_MODEL = "gemini-3-flash-preview";
+
+export const DB_COLUMN_TYPES = [
+  "text",
+  "integer",
+  "numeric",
+  "boolean",
+  "date",
+  "time",
+  "timestamp",
+] as const;
+
+export const PG_TYPE_BY_DB_TYPE: Record<(typeof DB_COLUMN_TYPES)[number], string> = {
+  text: "TEXT",
+  integer: "INTEGER",
+  numeric: "NUMERIC",
+  boolean: "BOOLEAN",
+  date: "DATE",
+  time: "TIME",
+  timestamp: "TIMESTAMP",
+};
+
+export const DEPARTMENT_ROLE_PRIORITY = {
+  department_staff: 0,
+  department_admin: 1,
+} as const;

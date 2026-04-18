@@ -1,9 +1,11 @@
+import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 
 import type { AppEnv } from "@/types/index.ts";
 
 import { db } from "@/db";
+import { sessions, users } from "@/db/schema/auth.ts";
 import { departmentMemberships, departments } from "@/db/schema/department/index.ts";
 import { auth } from "@/lib/auth.ts";
 import { normalizeIdentifier } from "@/lib/utils.ts";
@@ -21,6 +23,10 @@ const CREATE_STAFF_SCHEMA = z.object({
   email: z.email({ message: "Please enter a valid email address" }),
   username: z.string().trim().min(3).max(32),
   password: z.string().min(8).max(128),
+});
+
+const BAN_USER_SCHEMA = z.object({
+  userId: z.string().trim().min(1),
 });
 
 type AccessContext =
@@ -165,6 +171,7 @@ accessRoutes.get("/api/access/managed-users", requireAuth, async (c) => {
             name: true,
             email: true,
             username: true,
+            banned: true,
           },
         },
       },
@@ -181,7 +188,13 @@ accessRoutes.get("/api/access/managed-users", requireAuth, async (c) => {
             role: membership.role,
             createdAt: membership.createdAt.toISOString(),
             department: membership.department,
-            user: membership.user,
+            user: {
+              id: membership.user.id,
+              name: membership.user.name,
+              email: membership.user.email,
+              username: membership.user.username,
+              isBanned: membership.user.banned,
+            },
           })),
         },
       },
@@ -212,6 +225,7 @@ accessRoutes.get("/api/access/managed-users", requireAuth, async (c) => {
             name: true,
             email: true,
             username: true,
+            banned: true,
           },
         },
       },
@@ -228,7 +242,13 @@ accessRoutes.get("/api/access/managed-users", requireAuth, async (c) => {
             role: membership.role,
             createdAt: membership.createdAt.toISOString(),
             department: membership.department,
-            user: membership.user,
+            user: {
+              id: membership.user.id,
+              name: membership.user.name,
+              email: membership.user.email,
+              username: membership.user.username,
+              isBanned: membership.user.banned,
+            },
           })),
         },
       },
@@ -385,6 +405,290 @@ accessRoutes.post("/api/access/department-admins", requireSystemAdmin, async (c)
       400,
     );
   }
+});
+
+accessRoutes.post("/api/access/ban", requireAuth, async (c) => {
+  const currentUser = c.get("user");
+  const payload = await c.req.json().catch(() => null);
+  const parsed = BAN_USER_SCHEMA.safeParse(payload);
+
+  if (!currentUser) {
+    return c.json(
+      {
+        success: false,
+        message: "You are not signed in.",
+        data: null,
+      },
+      401,
+    );
+  }
+
+  if (!parsed.success) {
+    return c.json(
+      {
+        success: false,
+        message: "Invalid ban payload",
+        data: {
+          issues: parsed.error.issues.map((issue) => ({
+            path: issue.path.join("."),
+            message: issue.message,
+          })),
+        },
+      },
+      400,
+    );
+  }
+
+  if (parsed.data.userId === currentUser.id) {
+    return c.json(
+      {
+        success: false,
+        message: "You cannot ban yourself.",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  const accessContext = await resolveAccessContext(currentUser.id);
+
+  if (accessContext.role === "system_admin") {
+    const membership = await db.query.departmentMemberships.findFirst({
+      where: and(
+        eq(departmentMemberships.userId, parsed.data.userId),
+        eq(departmentMemberships.role, "department_admin"),
+        eq(departmentMemberships.createdByUserId, currentUser.id),
+      ),
+      columns: {
+        id: true,
+      },
+    });
+
+    if (!membership) {
+      return c.json(
+        {
+          success: false,
+          message: "Department admin not found.",
+          data: null,
+        },
+        404,
+      );
+    }
+  } else if (accessContext.role === "department_admin") {
+    const membership = await db.query.departmentMemberships.findFirst({
+      where: and(
+        eq(departmentMemberships.userId, parsed.data.userId),
+        eq(departmentMemberships.departmentId, accessContext.department.id),
+        eq(departmentMemberships.role, "department_staff"),
+        eq(departmentMemberships.createdByUserId, currentUser.id),
+      ),
+      columns: {
+        id: true,
+      },
+    });
+
+    if (!membership) {
+      return c.json(
+        {
+          success: false,
+          message: "Department staff not found.",
+          data: null,
+        },
+        404,
+      );
+    }
+  } else {
+    return c.json(
+      {
+        success: false,
+        message: "You do not have permission to ban users.",
+        data: null,
+      },
+      403,
+    );
+  }
+
+  const bannedUsers = await db
+    .update(users)
+    .set({
+      banned: true,
+      banReason:
+        accessContext.role === "system_admin"
+          ? "Banned by system admin."
+          : "Banned by department admin.",
+      banExpires: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, parsed.data.userId))
+    .returning({
+      id: users.id,
+      email: users.email,
+      banned: users.banned,
+    });
+
+  const bannedUser = bannedUsers[0];
+
+  if (!bannedUser) {
+    return c.json(
+      {
+        success: false,
+        message: "User not found.",
+        data: null,
+      },
+      404,
+    );
+  }
+
+  await db.delete(sessions).where(eq(sessions.userId, parsed.data.userId));
+
+  return c.json(
+    {
+      success: true,
+      message: "User banned successfully.",
+      data: {
+        user: {
+          id: bannedUser.id,
+          email: bannedUser.email,
+          isBanned: bannedUser.banned,
+        },
+      },
+    },
+    200,
+  );
+});
+
+accessRoutes.post("/api/access/unban", requireAuth, async (c) => {
+  const currentUser = c.get("user");
+  const payload = await c.req.json().catch(() => null);
+  const parsed = BAN_USER_SCHEMA.safeParse(payload);
+
+  if (!currentUser) {
+    return c.json(
+      {
+        success: false,
+        message: "You are not signed in.",
+        data: null,
+      },
+      401,
+    );
+  }
+
+  if (!parsed.success) {
+    return c.json(
+      {
+        success: false,
+        message: "Invalid unban payload",
+        data: {
+          issues: parsed.error.issues.map((issue) => ({
+            path: issue.path.join("."),
+            message: issue.message,
+          })),
+        },
+      },
+      400,
+    );
+  }
+
+  const accessContext = await resolveAccessContext(currentUser.id);
+
+  if (accessContext.role === "system_admin") {
+    const membership = await db.query.departmentMemberships.findFirst({
+      where: and(
+        eq(departmentMemberships.userId, parsed.data.userId),
+        eq(departmentMemberships.role, "department_admin"),
+        eq(departmentMemberships.createdByUserId, currentUser.id),
+      ),
+      columns: {
+        id: true,
+      },
+    });
+
+    if (!membership) {
+      return c.json(
+        {
+          success: false,
+          message: "Department admin not found.",
+          data: null,
+        },
+        404,
+      );
+    }
+  } else if (accessContext.role === "department_admin") {
+    const membership = await db.query.departmentMemberships.findFirst({
+      where: and(
+        eq(departmentMemberships.userId, parsed.data.userId),
+        eq(departmentMemberships.departmentId, accessContext.department.id),
+        eq(departmentMemberships.role, "department_staff"),
+        eq(departmentMemberships.createdByUserId, currentUser.id),
+      ),
+      columns: {
+        id: true,
+      },
+    });
+
+    if (!membership) {
+      return c.json(
+        {
+          success: false,
+          message: "Department staff not found.",
+          data: null,
+        },
+        404,
+      );
+    }
+  } else {
+    return c.json(
+      {
+        success: false,
+        message: "You do not have permission to unban users.",
+        data: null,
+      },
+      403,
+    );
+  }
+
+  const unbannedUsers = await db
+    .update(users)
+    .set({
+      banned: false,
+      banReason: null,
+      banExpires: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, parsed.data.userId))
+    .returning({
+      id: users.id,
+      email: users.email,
+      banned: users.banned,
+    });
+
+  const unbannedUser = unbannedUsers[0];
+
+  if (!unbannedUser) {
+    return c.json(
+      {
+        success: false,
+        message: "User not found.",
+        data: null,
+      },
+      404,
+    );
+  }
+
+  return c.json(
+    {
+      success: true,
+      message: "User unbanned successfully.",
+      data: {
+        user: {
+          id: unbannedUser.id,
+          email: unbannedUser.email,
+          isBanned: unbannedUser.banned,
+        },
+      },
+    },
+    200,
+  );
 });
 
 accessRoutes.post("/api/access/staff", requireAuth, async (c) => {

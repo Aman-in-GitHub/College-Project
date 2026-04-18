@@ -1,11 +1,11 @@
-import { usernameClient } from "better-auth/client/plugins";
+import { adminClient, usernameClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 
 import { env } from "@/lib/env";
 
 export const authClient = createAuthClient({
   baseURL: env.VITE_SERVER_URL,
-  plugins: [usernameClient()],
+  plugins: [usernameClient(), adminClient()],
   fetchOptions: {
     credentials: "include",
   },

@@ -8,6 +8,7 @@ import type { AppEnv, AuthSession } from "@/types/index.ts";
 
 import { db } from "@/db";
 import { auth } from "@/lib/auth.ts";
+import { DEPARTMENT_ROLE_PRIORITY } from "@/lib/constants.ts";
 import { normalizeIdentifier } from "@/lib/utils.ts";
 
 async function resolveAuthSession(c: Context<AppEnv>): Promise<AuthSession | null> {
@@ -35,11 +36,6 @@ const departmentLocatorSchema = z
     path: ["departmentId"],
     message: "Provide departmentId or departmentSlug.",
   });
-
-const departmentRolePriority: Record<DepartmentRole, number> = {
-  department_staff: 0,
-  department_admin: 1,
-};
 
 async function resolveGlobalRoles(c: Context<AppEnv>): Promise<AppEnv["Variables"]["globalRoles"]> {
   if (c.get("hasResolvedGlobalRoles")) {
@@ -249,7 +245,7 @@ function createDepartmentRoleMiddleware(requiredRole: DepartmentRole) {
 
     const membershipRole = membership.role;
 
-    if (departmentRolePriority[membershipRole] < departmentRolePriority[requiredRole]) {
+    if (DEPARTMENT_ROLE_PRIORITY[membershipRole] < DEPARTMENT_ROLE_PRIORITY[requiredRole]) {
       return c.json(
         {
           error: `This route requires ${requiredRole} access.`,

@@ -1,7 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button";
@@ -16,25 +15,31 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { authClient } from "@/lib/auth";
+import { FALLBACK_COLUMN_TYPES } from "@/lib/constants";
 import { env } from "@/lib/env";
-import { fetchApiJson, isRecord } from "@/lib/utils";
+import {
+  fetchApiJson,
+  isRecord,
+  showErrorToast,
+  showInfoToast,
+  showSuccessToast,
+  showWarningToast,
+} from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/")({
   component: RouteComponent,
 });
 
 const authenticatedRoute = getRouteApi("/_authenticated");
-
-const FALLBACK_COLUMN_TYPES = [
-  "text",
-  "integer",
-  "numeric",
-  "boolean",
-  "date",
-  "time",
-  "timestamp",
-] as const;
 
 type DbColumnType = (typeof FALLBACK_COLUMN_TYPES)[number];
 
@@ -103,6 +108,7 @@ type ManagedUserItem = {
     name: string;
     email: string;
     username: string | null;
+    isBanned: boolean;
   };
 };
 
@@ -199,7 +205,8 @@ function isManagedUserItem(value: unknown): value is ManagedUserItem {
     typeof value.user.id === "string" &&
     typeof value.user.name === "string" &&
     typeof value.user.email === "string" &&
-    (typeof value.user.username === "string" || value.user.username === null)
+    (typeof value.user.username === "string" || value.user.username === null) &&
+    typeof value.user.isBanned === "boolean"
   );
 }
 
@@ -254,6 +261,74 @@ async function fetchManagedUsers(): Promise<ManagedUsersResponse> {
   return body;
 }
 
+async function banManagedUser(userId: string): Promise<{ success: boolean; message: string }> {
+  const { response, body } = await fetchApiJson(`${env.VITE_SERVER_URL}/api/access/ban`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      userId,
+    }),
+  });
+
+  if (!response.ok) {
+    if (isRecord(body) && typeof body.message === "string") {
+      throw new Error(body.message);
+    }
+
+    throw new Error("Failed to ban user.");
+  }
+
+  if (
+    !isRecord(body) ||
+    typeof body.success !== "boolean" ||
+    typeof body.message !== "string" ||
+    body.success !== true
+  ) {
+    throw new Error("Ban response is invalid.");
+  }
+
+  return {
+    success: body.success,
+    message: body.message,
+  };
+}
+
+async function unbanManagedUser(userId: string): Promise<{ success: boolean; message: string }> {
+  const { response, body } = await fetchApiJson(`${env.VITE_SERVER_URL}/api/access/unban`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      userId,
+    }),
+  });
+
+  if (!response.ok) {
+    if (isRecord(body) && typeof body.message === "string") {
+      throw new Error(body.message);
+    }
+
+    throw new Error("Failed to unban user.");
+  }
+
+  if (
+    !isRecord(body) ||
+    typeof body.success !== "boolean" ||
+    typeof body.message !== "string" ||
+    body.success !== true
+  ) {
+    throw new Error("Unban response is invalid.");
+  }
+
+  return {
+    success: body.success,
+    message: body.message,
+  };
+}
+
 async function fetchDepartmentTables(departmentSlug: string): Promise<DepartmentTablesResponse> {
   const { response, body } = await fetchApiJson(`${env.VITE_SERVER_URL}/api/tables`, {
     headers: {
@@ -283,9 +358,11 @@ async function fetchDepartmentTables(departmentSlug: string): Promise<Department
 async function scanTableRequest({
   departmentSlug,
   file,
+  requestId: _requestId,
 }: {
   departmentSlug: string;
   file: File;
+  requestId: number;
 }): Promise<ScanResponse> {
   const formData = new FormData();
   formData.append("file", file, file.name);
@@ -389,10 +466,32 @@ function RouteComponent() {
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const schemaEditorRef = useRef<HTMLDivElement | null>(null);
+  const previewSectionRef = useRef<HTMLDivElement | null>(null);
+  const scanRequestIdRef = useRef(0);
   const managedUsersQuery = useQuery({
     queryKey: ["managed-users", accessContext.role, department?.id ?? null],
     queryFn: fetchManagedUsers,
     enabled: isSystemAdmin || isDepartmentAdmin,
+  });
+  const banUserMutation = useMutation({
+    mutationFn: banManagedUser,
+    onSuccess: (payload) => {
+      showSuccessToast(payload.message);
+      void managedUsersQuery.refetch();
+    },
+    onError: (error) => {
+      showErrorToast(error instanceof Error ? error.message : "Failed to ban user.");
+    },
+  });
+  const unbanUserMutation = useMutation({
+    mutationFn: unbanManagedUser,
+    onSuccess: (payload) => {
+      showSuccessToast(payload.message);
+      void managedUsersQuery.refetch();
+    },
+    onError: (error) => {
+      showErrorToast(error instanceof Error ? error.message : "Failed to unban user.");
+    },
   });
   const departmentTablesQuery = useQuery({
     queryKey: ["department-tables", department?.slug ?? null],
@@ -417,13 +516,17 @@ function RouteComponent() {
       navigate({ to: "/login" });
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Logout failed");
+      showErrorToast(error instanceof Error ? error.message : "Logout failed");
     },
   });
 
   const scanMutation = useMutation({
     mutationFn: scanTableRequest,
-    onSuccess: (payload) => {
+    onSuccess: (payload, variables) => {
+      if (variables.requestId !== scanRequestIdRef.current) {
+        return;
+      }
+
       setEditableSchemas(
         payload.data.tables.map((table) =>
           table.columns.map((column) => ({
@@ -436,20 +539,24 @@ function RouteComponent() {
       setSelectedTableIndex(0);
 
       if (payload.data.tables.length > 0) {
-        toast.success(payload.message || "Table scan complete.");
+        showInfoToast(payload.message || "Table scan complete.");
       } else {
-        toast.error(payload.message || "No table found in the uploaded image.");
+        showWarningToast(payload.message || "No table found in the uploaded image.");
       }
     },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Scan failed");
+    onError: (error, variables) => {
+      if (variables.requestId !== scanRequestIdRef.current) {
+        return;
+      }
+
+      showErrorToast(error instanceof Error ? error.message : "Scan failed");
     },
   });
 
   const createTableMutation = useMutation({
     mutationFn: createTableRequest,
     onSuccess: (payload) => {
-      toast.success(payload.message || "Table created successfully.");
+      showSuccessToast(payload.message || "Table created successfully.");
       navigate({
         to: "/$departmentSlug/$tableName",
         params: {
@@ -459,7 +566,7 @@ function RouteComponent() {
       });
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Table creation failed");
+      showErrorToast(error instanceof Error ? error.message : "Table creation failed");
     },
   });
 
@@ -477,6 +584,17 @@ function RouteComponent() {
       URL.revokeObjectURL(objectUrl);
     };
   }, [selectedFile]);
+
+  useEffect(() => {
+    if (!previewUrl) {
+      return;
+    }
+
+    previewSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, [previewUrl]);
 
   const scanResult = scanMutation.data?.data.tables ?? [];
   const availableTypes =
@@ -508,7 +626,9 @@ function RouteComponent() {
   }, [scanResult.length]);
 
   function resetFormState() {
+    scanRequestIdRef.current += 1;
     setSelectedFile(null);
+    setPreviewUrl(null);
     setEditableSchemas([]);
     setSelectedTableIndex(0);
     setTableName("");
@@ -545,18 +665,19 @@ function RouteComponent() {
 
   async function scanTable() {
     if (!selectedFile) {
-      toast.error("Please take or upload a photo first.");
+      showWarningToast("Please take or upload a photo first.");
       return;
     }
 
     if (!isDepartmentAdmin) {
-      toast.error("Only department admins can scan tables.");
+      showWarningToast("Only department admins can scan tables.");
       return;
     }
 
     await scanMutation.mutateAsync({
       departmentSlug: department.slug,
       file: selectedFile,
+      requestId: ++scanRequestIdRef.current,
     });
   }
 
@@ -606,17 +727,17 @@ function RouteComponent() {
 
   async function createTable() {
     if (currentColumns.length === 0) {
-      toast.error("No scanned columns to create a table from.");
+      showWarningToast("No scanned columns to create a table from.");
       return;
     }
 
     if (!tableName.trim()) {
-      toast.error("Please provide a table name.");
+      showWarningToast("Please provide a table name.");
       return;
     }
 
     if (!isDepartmentAdmin) {
-      toast.error("Only department admins can create tables.");
+      showWarningToast("Only department admins can create tables.");
       return;
     }
 
@@ -653,14 +774,15 @@ function RouteComponent() {
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row">
           {(isSystemAdmin || isDepartmentAdmin) && (
-            <Link to="/create" className={buttonVariants()}>
+            <Link to="/create" className={buttonVariants({ className: "w-full sm:w-auto" })}>
               Create New
             </Link>
           )}
           <Button
             variant="outline"
+            className="w-full sm:w-auto"
             disabled={signOutMutation.isPending}
             onClick={() => void signOutMutation.mutateAsync()}
           >
@@ -702,9 +824,31 @@ function RouteComponent() {
                         {item.department.name} ({item.department.slug})
                       </p>
                     ) : null}
+                    {item.user.isBanned ? <p className="text-destructive">Banned</p> : null}
                   </div>
-                  <div className="text-sm text-muted-foreground">
-                    {item.user.username ? `@${item.user.username}` : item.role}
+                  <div className="flex flex-col gap-3 sm:items-end">
+                    <div className="text-sm text-muted-foreground">
+                      {item.user.username ? `@${item.user.username}` : item.role}
+                    </div>
+                    <Button
+                      type="button"
+                      variant={item.user.isBanned ? "outline" : "destructive"}
+                      className="w-full sm:w-auto"
+                      disabled={banUserMutation.isPending || unbanUserMutation.isPending}
+                      onClick={() =>
+                        item.user.isBanned
+                          ? void unbanUserMutation.mutateAsync(item.user.id)
+                          : void banUserMutation.mutateAsync(item.user.id)
+                      }
+                    >
+                      {item.user.isBanned
+                        ? unbanUserMutation.isPending
+                          ? "Unbanning..."
+                          : "Unban"
+                        : banUserMutation.isPending
+                          ? "Banning..."
+                          : "Ban"}
+                    </Button>
                   </div>
                 </div>
               ))
@@ -762,39 +906,45 @@ function RouteComponent() {
               <CardDescription>Choose one method: camera or upload.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="camera-photo">Take Photo</Label>
-                <Input
-                  id="camera-photo"
-                  ref={cameraInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={onSelectFile}
-                />
-              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="camera-photo">Take Photo</Label>
+                  <Input
+                    id="camera-photo"
+                    ref={cameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={onSelectFile}
+                  />
+                </div>
 
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="upload-photo">Upload Photo</Label>
-                <Input
-                  id="upload-photo"
-                  ref={uploadInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={onSelectFile}
-                />
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="upload-photo">Upload Photo</Label>
+                  <Input
+                    id="upload-photo"
+                    ref={uploadInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={onSelectFile}
+                  />
+                </div>
               </div>
 
               {previewUrl ? (
-                <img
-                  src={previewUrl}
-                  alt="Selected table preview"
-                  className="max-h-96 w-full object-contain"
-                />
+                <div ref={previewSectionRef} className="flex flex-col gap-3">
+                  <img
+                    src={previewUrl}
+                    alt="Selected table preview"
+                    className="max-h-96 w-full object-contain"
+                  />
+                </div>
               ) : null}
 
-              <div className="flex flex-wrap gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row">
                 <Button
+                  type="button"
+                  className="w-full sm:w-auto"
                   disabled={
                     !selectedFile || scanMutation.isPending || createTableMutation.isPending
                   }
@@ -803,7 +953,9 @@ function RouteComponent() {
                   {scanMutation.isPending ? "Scanning..." : "Scan Table"}
                 </Button>
                 <Button
+                  type="button"
                   variant="outline"
+                  className="w-full sm:w-auto"
                   disabled={!selectedFile && scanResult.length === 0 && !previewUrl}
                   onClick={clearSelection}
                 >
@@ -851,55 +1003,59 @@ function RouteComponent() {
                   />
                 </div>
 
-                <div className="flex flex-col gap-4">
-                  {currentColumns.map((column, index) => (
-                    <div key={`column-${index}`} className="grid grid-cols-1 gap-3 md:grid-cols-4">
-                      <div className="flex flex-col gap-2 md:col-span-1">
-                        <Label htmlFor={`column-required-${index}`}>Required</Label>
-                        <div className="flex h-10 items-center">
-                          <Checkbox
-                            id={`column-required-${index}`}
-                            checked={column.isRequired}
-                            onCheckedChange={(checked) =>
-                              updateColumnRequired(index, checked === true)
-                            }
-                          />
-                        </div>
-                      </div>
-                      <div className="flex flex-col gap-2 md:col-span-1">
-                        <Label htmlFor={`column-name-${index}`}>Column Name</Label>
-                        <Input
-                          id={`column-name-${index}`}
-                          value={column.name}
-                          onChange={(event) => updateColumnName(index, event.target.value)}
-                        />
-                      </div>
-                      <div className="flex flex-col gap-2 md:col-span-1">
-                        <Label>Data Type</Label>
-                        <Select
-                          value={column.type}
-                          onValueChange={(value) => updateColumnType(index, value)}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue>{column.type}</SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            {availableTypes.map((type) => (
-                              <SelectItem key={`${index}-${type}`} value={type}>
-                                {type}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex flex-col gap-2 md:col-span-1">
-                        <Label>Sample Values</Label>
-                        <p className="text-sm text-muted-foreground">
-                          {formatSampleValues(currentSampleColumns[index]?.values ?? [])}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
+                <div className="overflow-x-auto border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-24">Required</TableHead>
+                        <TableHead className="min-w-48">Column Name</TableHead>
+                        <TableHead className="w-56">Data Type</TableHead>
+                        <TableHead className="min-w-56">Sample Values</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {currentColumns.map((column, index) => (
+                        <TableRow key={`column-${index}`}>
+                          <TableCell>
+                            <Checkbox
+                              id={`column-required-${index}`}
+                              checked={column.isRequired}
+                              onCheckedChange={(checked) =>
+                                updateColumnRequired(index, checked === true)
+                              }
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              id={`column-name-${index}`}
+                              value={column.name}
+                              onChange={(event) => updateColumnName(index, event.target.value)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Select
+                              value={column.type}
+                              onValueChange={(value) => updateColumnType(index, value)}
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue>{column.type}</SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                {availableTypes.map((type) => (
+                                  <SelectItem key={`${index}-${type}`} value={type}>
+                                    {type}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {formatSampleValues(currentSampleColumns[index]?.values ?? [])}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
 
                 <div className="flex flex-col gap-3">
@@ -915,6 +1071,7 @@ function RouteComponent() {
                   </div>
 
                   <Button
+                    type="button"
                     disabled={
                       scanMutation.isPending ||
                       createTableMutation.isPending ||

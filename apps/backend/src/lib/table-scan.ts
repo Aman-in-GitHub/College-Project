@@ -53,6 +53,26 @@ const extractedTablesSchema = z.object({
     ),
 });
 
+const extractedRowValuesSchema = z.object({
+  values: z
+    .array(
+      z
+        .string()
+        .describe(
+          "One cell value in the exact column order provided. Use an empty string for blank cells.",
+        ),
+    )
+    .describe("Cell values for a single row, following the exact provided column order."),
+});
+
+const extractedExistingTableRowsSchema = z.object({
+  rows: z
+    .array(extractedRowValuesSchema)
+    .describe(
+      "Rows extracted for the existing table schema only, preserving the top-to-bottom order from the image.",
+    ),
+});
+
 const google = createGoogleGenerativeAI({
   apiKey: env.GEMINI_API_KEY,
 });
@@ -178,4 +198,94 @@ export async function scanTableImageWithGemini(
   );
 
   return toScannedTables(output.tables);
+}
+
+export async function scanExistingTableRowsWithGemini(params: {
+  file: File;
+  logger: Logger;
+  tableName: string;
+  columns: Array<{
+    name: string;
+    dataType: string;
+    isNullable: boolean;
+  }>;
+}): Promise<string[][]> {
+  const imageBytes = new Uint8Array(await params.file.arrayBuffer());
+  const columnDescriptions = params.columns
+    .map((column, index) => {
+      return `${index + 1}. ${column.name} (${column.dataType}, ${column.isNullable ? "optional" : "required"})`;
+    })
+    .join("\n");
+
+  const { output, usage, warnings } = await generateText({
+    model: google(GEMINI_TABLE_SCAN_MODEL),
+    output: Output.object({
+      name: "existing_table_row_import",
+      description: "Structured extraction of rows for an already-defined table schema.",
+      schema: extractedExistingTableRowsSchema,
+    }),
+    providerOptions: {
+      google: {
+        structuredOutputs: true,
+      },
+    },
+    system: [
+      "You extract row data from a single uploaded image for an existing PostgreSQL table.",
+      "Use only the provided table schema and column order.",
+      "Do not add, rename, reorder, or infer new columns.",
+      "Return only rows that match the provided table context.",
+      "Ignore headings, summaries, notes, totals, stamps, and unrelated text outside the table rows.",
+      "Use empty strings for blank or unreadable cells.",
+      "Preserve row order exactly as it appears in the image.",
+      "If no matching rows are visible, return an empty rows array.",
+    ].join(" "),
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              `Table name: ${params.tableName}`,
+              "Extract rows for this existing table only.",
+              "Return each row as an array of strings in this exact column order:",
+              columnDescriptions,
+            ].join("\n\n"),
+          },
+          {
+            type: "file",
+            mediaType: params.file.type || "image/png",
+            data: imageBytes,
+            filename: params.file.name || "table-image",
+          },
+        ],
+      },
+    ],
+  });
+
+  if (warnings && warnings.length > 0) {
+    params.logger.warn({ warnings }, "Gemini existing-table import returned provider warnings");
+  }
+
+  params.logger.info(
+    {
+      model: GEMINI_TABLE_SCAN_MODEL,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      totalTokens: usage.totalTokens,
+      tableName: params.tableName,
+      requestedColumnCount: params.columns.length,
+      importedRowCount: output.rows.length,
+    },
+    "Gemini existing-table row import complete",
+  );
+
+  return output.rows
+    .map((row) => row.values.slice(0, params.columns.length))
+    .map((row) =>
+      params.columns.map((_, index) => {
+        return row[index]?.trim() ?? "";
+      }),
+    )
+    .filter((row) => row.some((value) => value.length > 0));
 }

@@ -3,26 +3,6 @@ import type { Context } from "hono";
 import { getConnInfo } from "hono/bun";
 import { isIP } from "node:net";
 
-export const DB_COLUMN_TYPES = [
-  "text",
-  "integer",
-  "numeric",
-  "boolean",
-  "date",
-  "time",
-  "timestamp",
-] as const;
-
-export const PG_TYPE_BY_DB_TYPE: Record<(typeof DB_COLUMN_TYPES)[number], string> = {
-  text: "TEXT",
-  integer: "INTEGER",
-  numeric: "NUMERIC",
-  boolean: "BOOLEAN",
-  date: "DATE",
-  time: "TIME",
-  timestamp: "TIMESTAMP",
-};
-
 const RESERVED_IDENTIFIERS = new Set([
   "select",
   "from",
