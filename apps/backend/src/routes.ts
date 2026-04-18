@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { nanoid } from "nanoid";
 import { z } from "zod";
 
 import type { AppEnv } from "@/types/index.ts";
@@ -26,9 +27,81 @@ const CREATE_TABLE_REQUEST_SCHEMA = z.object({
     )
     .min(1)
     .max(200),
+  fillData: z.boolean().default(false),
+  rows: z.array(z.array(z.string())).default([]),
 });
 
 export const routes = new Hono<AppEnv>();
+
+type NormalizedColumn = {
+  name: string;
+  normalizedName: string;
+  type: (typeof DB_COLUMN_TYPES)[number];
+};
+
+function normalizeScannedCellValue(value: string, type: NormalizedColumn["type"]): string | null {
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    return null;
+  }
+
+  if (type === "integer") {
+    const normalizedValue = trimmedValue.replace(/,/g, "");
+    return normalizedValue || null;
+  }
+
+  if (type === "numeric") {
+    const normalizedValue = trimmedValue.replace(/[$€£¥₹,\s]/g, "");
+    return normalizedValue || null;
+  }
+
+  if (type === "boolean") {
+    const normalizedValue = trimmedValue.toLowerCase();
+
+    if (["true", "t", "yes", "y", "1"].includes(normalizedValue)) {
+      return "true";
+    }
+
+    if (["false", "f", "no", "n", "0"].includes(normalizedValue)) {
+      return "false";
+    }
+  }
+
+  return trimmedValue;
+}
+
+function buildInsertRowsStatement(
+  tableName: string,
+  columns: NormalizedColumn[],
+  rows: string[][],
+) {
+  const columnIdentifiers = sql.join(
+    [
+      sql.raw(quoteIdentifier("id")),
+      ...columns.map((column) => sql.raw(quoteIdentifier(column.normalizedName))),
+    ],
+    sql`, `,
+  );
+
+  const rowTuples = rows.map(
+    (row) =>
+      sql`(${sql.join(
+        [
+          sql`${nanoid(32)}`,
+          ...columns.map((column, columnIndex) => {
+            return sql`${normalizeScannedCellValue(row[columnIndex] ?? "", column.type)}`;
+          }),
+        ],
+        sql`, `,
+      )})`,
+  );
+
+  return sql`INSERT INTO ${sql.raw(quoteIdentifier(tableName))} (${columnIdentifiers}) VALUES ${sql.join(
+    rowTuples,
+    sql`, `,
+  )};`;
+}
 
 routes.post("/api/table/scan", requireAuth, async (c) => {
   const reqLogger = c.get("logger");
@@ -154,12 +227,12 @@ routes.post("/api/table/create", requireAuth, async (c) => {
     );
   }
 
-  const normalizedColumns = parsed.data.columns.map((column) => ({
+  const candidateColumns = parsed.data.columns.map((column) => ({
     ...column,
     normalizedName: normalizeIdentifier(column.name),
   }));
 
-  const invalidColumns = normalizedColumns
+  const invalidColumns = candidateColumns
     .filter((column) => !column.normalizedName)
     .map((column) => ({
       name: column.name,
@@ -190,6 +263,10 @@ routes.post("/api/table/create", requireAuth, async (c) => {
     );
   }
 
+  const normalizedColumns: NormalizedColumn[] = candidateColumns.flatMap((column) =>
+    column.normalizedName ? [{ ...column, normalizedName: column.normalizedName }] : [],
+  );
+
   const duplicateColumn = normalizedColumns.find(
     (column, index) =>
       normalizedColumns.findIndex(
@@ -217,14 +294,32 @@ routes.post("/api/table/create", requireAuth, async (c) => {
     );
   }
 
-  const columnDefinitions = normalizedColumns.map((column) => {
-    const sqlType = PG_TYPE_BY_DB_TYPE[column.type];
-    return `${quoteIdentifier(column.normalizedName as string)} ${sqlType}`;
-  });
+  if (normalizedColumns.some((column) => column.normalizedName === "id")) {
+    return c.json(
+      {
+        success: false,
+        message: "Column name id is reserved. It is added automatically.",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  const columnDefinitions = [
+    `${quoteIdentifier("id")} TEXT PRIMARY KEY`,
+    ...normalizedColumns.map((column) => {
+      const sqlType = PG_TYPE_BY_DB_TYPE[column.type];
+      return `${quoteIdentifier(column.normalizedName)} ${sqlType}`;
+    }),
+  ];
 
   const createTableStatement = `CREATE TABLE IF NOT EXISTS ${quoteIdentifier(
     normalizedTableName,
   )} (${columnDefinitions.join(", ")});`;
+
+  const rowsToInsert = parsed.data.rows
+    .map((row) => normalizedColumns.map((_, columnIndex) => row[columnIndex] ?? ""))
+    .filter((row) => row.some((value) => value.trim().length > 0));
 
   reqLogger.info(
     {
@@ -235,26 +330,67 @@ routes.post("/api/table/create", requireAuth, async (c) => {
         normalizedName: column.normalizedName,
         type: column.type,
       })),
+      fillData: parsed.data.fillData,
+      requestedRowCount: parsed.data.rows.length,
+      insertedRowCount: parsed.data.fillData ? rowsToInsert.length : 0,
       createTableStatement,
     },
     "Executing create table statement",
   );
 
-  await db.execute(sql.raw(createTableStatement));
+  try {
+    await db.transaction(async (tx) => {
+      await tx.execute(sql.raw(createTableStatement));
+
+      if (parsed.data.fillData && rowsToInsert.length > 0) {
+        await tx.execute(
+          buildInsertRowsStatement(normalizedTableName, normalizedColumns, rowsToInsert),
+        );
+      }
+    });
+  } catch (error) {
+    reqLogger.error(
+      {
+        route: "/api/table/create",
+        tableName: normalizedTableName,
+        fillData: parsed.data.fillData,
+        insertedRowCount: parsed.data.fillData ? rowsToInsert.length : 0,
+        error,
+      },
+      "Failed to create table or insert scanned data",
+    );
+
+    return c.json(
+      {
+        success: false,
+        message: parsed.data.fillData
+          ? "Table creation failed while inserting scanned photo data. Check the detected column types and values."
+          : "Table creation failed",
+        data: null,
+      },
+      400,
+    );
+  }
 
   reqLogger.info(
     {
       route: "/api/table/create",
       tableName: normalizedTableName,
       columnCount: normalizedColumns.length,
+      insertedRowCount: parsed.data.fillData ? rowsToInsert.length : 0,
     },
     "Table created",
   );
 
+  const successMessage =
+    parsed.data.fillData && rowsToInsert.length > 0
+      ? `Table created and ${rowsToInsert.length} rows inserted successfully`
+      : "Table created successfully";
+
   return c.json(
     {
       success: true,
-      message: "Table created successfully",
+      message: successMessage,
       data: {
         tableName: normalizedTableName,
         columns: normalizedColumns.map((column) => ({

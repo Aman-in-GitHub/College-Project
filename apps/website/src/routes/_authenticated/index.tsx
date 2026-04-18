@@ -1,10 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -71,6 +72,23 @@ type CreateTableResponse = {
   message: string;
 };
 
+function toScanRows(columns: ScannedColumn[]): string[][] {
+  const rowCount = columns.reduce(
+    (maxCount, column) => Math.max(maxCount, column.values.length),
+    0,
+  );
+
+  return Array.from({ length: rowCount }, (_, rowIndex) =>
+    columns.map((column) => column.values[rowIndex] ?? ""),
+  );
+}
+
+function formatSampleValues(values: string[]): string {
+  const previewValues = values.slice(0, 3).map((value) => (value.trim() ? value : "null"));
+
+  return previewValues.join(", ") || "No samples";
+}
+
 function isDbColumnType(value: string | null): value is DbColumnType {
   return value !== null && FALLBACK_COLUMN_TYPES.includes(value as DbColumnType);
 }
@@ -128,6 +146,8 @@ async function scanTableRequest(file: File): Promise<ScanResponse> {
 async function createTableRequest(payload: {
   tableName: string;
   columns: EditableColumn[];
+  fillData: boolean;
+  rows: string[][];
 }): Promise<CreateTableResponse> {
   const response = await fetch(`${env.VITE_SERVER_URL}/api/table/create`, {
     method: "POST",
@@ -159,6 +179,10 @@ function RouteComponent() {
   const [editableSchemas, setEditableSchemas] = useState<EditableColumn[][]>([]);
   const [selectedTableIndex, setSelectedTableIndex] = useState(0);
   const [tableName, setTableName] = useState("");
+  const [isFillDataEnabled, setIsFillDataEnabled] = useState(false);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const schemaEditorRef = useRef<HTMLDivElement | null>(null);
 
   const scanMutation = useMutation({
     mutationFn: scanTableRequest,
@@ -219,6 +243,7 @@ function RouteComponent() {
 
   const currentColumns = editableSchemas[activeTableIndex] ?? [];
   const currentSampleColumns = scanResult[activeTableIndex]?.columns ?? [];
+  const currentRows = toScanRows(currentSampleColumns);
   const selectedTableLabel =
     scanResult.length > 0 ? `Table ${activeTableIndex + 1}` : "Select table";
 
@@ -228,13 +253,49 @@ function RouteComponent() {
     }
   }, [scanResult.length, selectedTableIndex]);
 
-  function onSelectFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] ?? null;
-    setSelectedFile(file);
-    scanMutation.reset();
-    createTableMutation.reset();
+  useEffect(() => {
+    if (scanResult.length > 0) {
+      schemaEditorRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
+  }, [scanResult.length]);
+
+  function resetFormState() {
+    setSelectedFile(null);
     setEditableSchemas([]);
     setSelectedTableIndex(0);
+    setTableName("");
+    setIsFillDataEnabled(false);
+    scanMutation.reset();
+    createTableMutation.reset();
+  }
+
+  function clearSelection() {
+    resetFormState();
+    if (cameraInputRef.current) {
+      cameraInputRef.current.value = "";
+    }
+    if (uploadInputRef.current) {
+      uploadInputRef.current.value = "";
+    }
+  }
+
+  function onSelectFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    const inputId = event.target.id;
+
+    resetFormState();
+    setSelectedFile(file);
+
+    if (inputId === "camera-photo" && uploadInputRef.current) {
+      uploadInputRef.current.value = "";
+    }
+
+    if (inputId === "upload-photo" && cameraInputRef.current) {
+      cameraInputRef.current.value = "";
+    }
   }
 
   async function scanTable() {
@@ -290,6 +351,8 @@ function RouteComponent() {
     await createTableMutation.mutateAsync({
       tableName,
       columns: currentColumns,
+      fillData: isFillDataEnabled,
+      rows: isFillDataEnabled ? currentRows : [],
     });
   }
 
@@ -307,6 +370,7 @@ function RouteComponent() {
             <Label htmlFor="camera-photo">Take Photo</Label>
             <Input
               id="camera-photo"
+              ref={cameraInputRef}
               type="file"
               accept="image/*"
               capture="environment"
@@ -316,7 +380,13 @@ function RouteComponent() {
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="upload-photo">Upload Photo</Label>
-            <Input id="upload-photo" type="file" accept="image/*" onChange={onSelectFile} />
+            <Input
+              id="upload-photo"
+              ref={uploadInputRef}
+              type="file"
+              accept="image/*"
+              onChange={onSelectFile}
+            />
           </div>
 
           {previewUrl ? (
@@ -327,19 +397,26 @@ function RouteComponent() {
             />
           ) : null}
 
-          <div>
+          <div className="flex flex-wrap gap-3">
             <Button
               disabled={!selectedFile || scanMutation.isPending || createTableMutation.isPending}
               onClick={scanTable}
             >
               {scanMutation.isPending ? "Scanning..." : "Scan Table"}
             </Button>
+            <Button
+              variant="outline"
+              disabled={!selectedFile && scanResult.length === 0 && !previewUrl}
+              onClick={clearSelection}
+            >
+              Clear
+            </Button>
           </div>
         </CardContent>
       </Card>
 
       {scanResult.length > 0 ? (
-        <Card>
+        <Card ref={schemaEditorRef}>
           <CardHeader>
             <CardTitle>Schema Editor</CardTitle>
             <CardDescription>
@@ -408,15 +485,25 @@ function RouteComponent() {
                   <div className="flex flex-col gap-2 md:col-span-1">
                     <Label>Sample Values</Label>
                     <p className="text-sm text-muted-foreground">
-                      {(currentSampleColumns[index]?.values ?? []).slice(0, 3).join(", ") ||
-                        "No samples"}
+                      {formatSampleValues(currentSampleColumns[index]?.values ?? [])}
                     </p>
                   </div>
                 </div>
               ))}
             </div>
 
-            <div>
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  id="fill-data"
+                  checked={isFillDataEnabled}
+                  onCheckedChange={(checked) => setIsFillDataEnabled(checked === true)}
+                />
+                <Label htmlFor="fill-data" className="cursor-pointer">
+                  Fill data from photo into table
+                </Label>
+              </div>
+
               <Button
                 disabled={
                   scanMutation.isPending ||
