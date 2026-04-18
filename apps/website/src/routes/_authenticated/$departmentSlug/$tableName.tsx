@@ -1038,7 +1038,7 @@ function RouteComponent() {
       >
         <div className="flex flex-col gap-1">
           <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <TableIcon className="size-5 text-primary" weight="duotone" />
+            <TableIcon className="mb-1 size-5 text-primary" weight="duotone" />
             {params.tableName}
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -1047,7 +1047,7 @@ function RouteComponent() {
           </p>
         </div>
         <Link to="/" className={buttonVariants({ variant: "default" })}>
-          <ArrowLeftIcon className="size-4" weight="bold" />
+          <ArrowLeftIcon className="mb-1 size-4" weight="bold" />
           Back
         </Link>
       </motion.div>
@@ -1056,7 +1056,7 @@ function RouteComponent() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <TableIcon className="size-5 text-primary" weight="duotone" />
+              <TableIcon className="mb-1 size-5 text-primary" weight="duotone" />
               Table Data
             </CardTitle>
             <CardDescription>
@@ -1079,7 +1079,7 @@ function RouteComponent() {
                   <div className="flex flex-col gap-2">
                     <label htmlFor="table-import-camera" className="text-sm font-medium">
                       <span className="mr-2 inline-flex align-middle">
-                        <CameraIcon className="size-4 text-primary" weight="duotone" />
+                        <CameraIcon className="mb-1 size-4 text-primary" weight="duotone" />
                       </span>
                       Take Photo
                     </label>
@@ -1095,7 +1095,7 @@ function RouteComponent() {
                   <div className="flex flex-col gap-2">
                     <label htmlFor="table-import-upload" className="text-sm font-medium">
                       <span className="mr-2 inline-flex align-middle">
-                        <UploadSimpleIcon className="size-4 text-primary" weight="duotone" />
+                        <UploadSimpleIcon className="mb-1 size-4 text-primary" weight="duotone" />
                       </span>
                       Upload Photo
                     </label>
@@ -1110,7 +1110,7 @@ function RouteComponent() {
                   <div className="flex flex-col gap-2">
                     <label htmlFor="table-import-csv" className="text-sm font-medium">
                       <span className="mr-2 inline-flex align-middle">
-                        <FileCsvIcon className="size-4 text-primary" weight="duotone" />
+                        <FileCsvIcon className="mb-1 size-4 text-primary" weight="duotone" />
                       </span>
                       Upload CSV
                     </label>
@@ -1148,7 +1148,7 @@ function RouteComponent() {
                     }
                     onClick={handleImportRows}
                   >
-                    <UploadSimpleIcon className="size-4" weight="bold" />
+                    <UploadSimpleIcon className="mb-1 size-4" weight="bold" />
                     {importRowsMutation.isPending || importCsvMutation.isPending
                       ? "Importing..."
                       : "Import Rows"}
@@ -1160,7 +1160,7 @@ function RouteComponent() {
                     disabled={!selectedImportFile && !importPreviewUrl}
                     onClick={handleClearImportSelection}
                   >
-                    <EraserIcon className="size-4" weight="bold" />
+                    <EraserIcon className="mb-1 size-4" weight="bold" />
                     Clear
                   </Button>
                 </div>
@@ -1170,7 +1170,7 @@ function RouteComponent() {
             <div className="flex flex-col gap-2">
               <label htmlFor="table-search" className="text-sm font-medium">
                 <span className="mr-2 inline-flex align-middle">
-                  <MagnifyingGlassIcon className="size-4 text-primary" weight="duotone" />
+                  <MagnifyingGlassIcon className="mb-1 size-4 text-primary" weight="duotone" />
                 </span>
                 Search
               </label>
@@ -1248,7 +1248,7 @@ function RouteComponent() {
                             disabled={!canAddRow || addRowMutation.isPending}
                             onClick={handleAddRow}
                           >
-                            <PlusIcon className="size-4" weight="bold" />
+                            <PlusIcon className="mb-1 size-4" weight="bold" />
                             {addRowMutation.isPending ? "Adding..." : "Add"}
                           </Button>
                         </TableCell>
@@ -1287,7 +1287,7 @@ function RouteComponent() {
                       disabled={rows.length === 0 || tableQuery.isLoading}
                       onClick={handleExportCurrentPage}
                     >
-                      <DownloadSimpleIcon className="size-4" weight="bold" />
+                      <DownloadSimpleIcon className="mb-1 size-4" weight="bold" />
                       Export Current Page
                     </Button>
                     <Button
@@ -1297,7 +1297,7 @@ function RouteComponent() {
                       disabled={tableQuery.isLoading || isExportingAll}
                       onClick={() => void handleExportAll()}
                     >
-                      <DownloadSimpleIcon className="size-4" weight="bold" />
+                      <DownloadSimpleIcon className="mb-1 size-4" weight="bold" />
                       {isExportingAll ? "Exporting..." : "Export Full Table"}
                     </Button>
                   </div>

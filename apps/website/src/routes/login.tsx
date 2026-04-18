@@ -92,7 +92,7 @@ function RouteComponent() {
                     {...getEnterAnimationProps(isReducedMotion, 0.12)}
                   >
                     <h1 className="flex items-center gap-2 text-2xl font-bold">
-                      <LockKeyOpenIcon className="size-6 text-primary" weight="duotone" />
+                      <LockKeyOpenIcon className="mb-1 size-6 text-primary" weight="duotone" />
                       Welcome back
                     </h1>
                     <p className="text-balance text-muted-foreground">Login to your account</p>
@@ -165,7 +165,7 @@ function RouteComponent() {
                     {([canSubmit, isSubmitting]) => (
                       <Field>
                         <Button type="submit" disabled={!canSubmit}>
-                          <SignInIcon className="size-4" weight="bold" />
+                          <SignInIcon className="mb-1 size-4" weight="bold" />
                           {isSubmitting ? "Logging in..." : "Login"}
                         </Button>
                       </Field>

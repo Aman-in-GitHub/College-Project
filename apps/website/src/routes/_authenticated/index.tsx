@@ -808,7 +808,7 @@ function RouteComponent() {
       >
         <div className="flex flex-col gap-1">
           <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <HouseLineIcon className="size-5 text-primary" weight="duotone" />
+            <HouseLineIcon className="mb-1 size-5 text-primary" weight="duotone" />
             {isSystemAdmin
               ? "Department Admins"
               : isDepartmentAdmin
@@ -831,7 +831,7 @@ function RouteComponent() {
         <div className="flex flex-col gap-3 sm:flex-row">
           {(isSystemAdmin || isDepartmentAdmin) && (
             <Link to="/create" className={buttonVariants({ className: "w-full sm:w-auto" })}>
-              <PlusIcon className="size-4" weight="bold" />
+              <PlusIcon className="mb-1 size-4" weight="bold" />
               Create New
             </Link>
           )}
@@ -841,7 +841,7 @@ function RouteComponent() {
             disabled={signOutMutation.isPending}
             onClick={() => void signOutMutation.mutateAsync()}
           >
-            <SignOutIcon className="size-4" weight="bold" />
+            <SignOutIcon className="mb-1 size-4" weight="bold" />
             {signOutMutation.isPending ? "Logging out..." : "Logout"}
           </Button>
           <div className="flex w-full sm:w-auto">
@@ -855,7 +855,7 @@ function RouteComponent() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <UsersThreeIcon className="size-5 text-primary" weight="duotone" />
+                <UsersThreeIcon className="mb-1 size-5 text-primary" weight="duotone" />
                 {isSystemAdmin ? "Created Department Admins" : "Created Staff"}
               </CardTitle>
               <CardDescription>
@@ -931,7 +931,7 @@ function RouteComponent() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <TableIcon className="size-5 text-primary" weight="duotone" />
+                <TableIcon className="mb-1 size-5 text-primary" weight="duotone" />
                 Tables
               </CardTitle>
               <CardDescription>Open digitized tables for {department.name}.</CardDescription>
@@ -980,7 +980,7 @@ function RouteComponent() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <CameraIcon className="size-5 text-primary" weight="duotone" />
+                  <CameraIcon className="mb-1 size-5 text-primary" weight="duotone" />
                   Photo Input
                 </CardTitle>
                 <CardDescription>Choose one method: camera or upload.</CardDescription>
@@ -1037,7 +1037,7 @@ function RouteComponent() {
                     }
                     onClick={scanTable}
                   >
-                    <MagnifyingGlassIcon className="size-4" weight="bold" />
+                    <MagnifyingGlassIcon className="mb-1 size-4" weight="bold" />
                     {scanMutation.isPending ? "Scanning..." : "Scan Table"}
                   </Button>
                   <Button
@@ -1047,7 +1047,7 @@ function RouteComponent() {
                     disabled={!selectedFile && scanResult.length === 0 && !previewUrl}
                     onClick={clearSelection}
                   >
-                    <EraserIcon className="size-4" weight="bold" />
+                    <EraserIcon className="mb-1 size-4" weight="bold" />
                     Clear
                   </Button>
                 </div>
@@ -1065,7 +1065,7 @@ function RouteComponent() {
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <TableIcon className="size-5 text-primary" weight="duotone" />
+                      <TableIcon className="mb-1 size-5 text-primary" weight="duotone" />
                       Schema Editor
                     </CardTitle>
                     <CardDescription>
@@ -1178,7 +1178,7 @@ function RouteComponent() {
                         }
                         onClick={createTable}
                       >
-                        <PlusIcon className="size-4" weight="bold" />
+                        <PlusIcon className="mb-1 size-4" weight="bold" />
                         {createTableMutation.isPending ? "Creating..." : "Create Table"}
                       </Button>
                     </div>

@@ -100,7 +100,7 @@ function CreateFormActions(props: {
           className="w-full sm:w-auto"
           disabled={!props.canSubmit || props.isPending}
         >
-          <UserPlusIcon className="size-4" weight="bold" />
+          <UserPlusIcon className="mb-1 size-4" weight="bold" />
           {props.isPending ? "Creating..." : props.submitLabel}
         </Button>
         <Button
@@ -110,7 +110,7 @@ function CreateFormActions(props: {
           disabled={props.isPending}
           onClick={props.onClear}
         >
-          <EraserIcon className="size-4" weight="bold" />
+          <EraserIcon className="mb-1 size-4" weight="bold" />
           Clear
         </Button>
       </div>
@@ -181,7 +181,7 @@ function RouteComponent() {
       >
         <div className="flex flex-col gap-1">
           <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <UserPlusIcon className="size-5 text-primary" weight="duotone" />
+            <UserPlusIcon className="mb-1 size-5 text-primary" weight="duotone" />
             Create Access
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -189,7 +189,7 @@ function RouteComponent() {
           </p>
         </div>
         <Link to="/" className={buttonVariants({ variant: "default" })}>
-          <ArrowLeftIcon className="size-4" weight="bold" />
+          <ArrowLeftIcon className="mb-1 size-4" weight="bold" />
           Back
         </Link>
       </motion.div>
@@ -246,7 +246,7 @@ function CreateDepartmentAdminForm() {
       >
         <div className="flex flex-col gap-1">
           <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <BuildingsIcon className="size-5 text-primary" weight="duotone" />
+            <BuildingsIcon className="mb-1 size-5 text-primary" weight="duotone" />
             Create Department Admin
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -254,7 +254,7 @@ function CreateDepartmentAdminForm() {
           </p>
         </div>
         <Link to="/" className={buttonVariants({ variant: "default" })}>
-          <ArrowLeftIcon className="size-4" weight="bold" />
+          <ArrowLeftIcon className="mb-1 size-4" weight="bold" />
           Back
         </Link>
       </motion.div>
@@ -263,7 +263,7 @@ function CreateDepartmentAdminForm() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <ShieldCheckIcon className="size-5 text-primary" weight="duotone" />
+              <ShieldCheckIcon className="mb-1 size-5 text-primary" weight="duotone" />
               Department Admin Details
             </CardTitle>
             <CardDescription>
@@ -470,7 +470,7 @@ function CreateStaffForm({ departmentName }: { departmentName: string }) {
       >
         <div className="flex flex-col gap-1">
           <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <UsersThreeIcon className="size-5 text-primary" weight="duotone" />
+            <UsersThreeIcon className="mb-1 size-5 text-primary" weight="duotone" />
             Create Staff
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -478,7 +478,7 @@ function CreateStaffForm({ departmentName }: { departmentName: string }) {
           </p>
         </div>
         <Link to="/" className={buttonVariants({ variant: "default" })}>
-          <ArrowLeftIcon className="size-4" weight="bold" />
+          <ArrowLeftIcon className="mb-1 size-4" weight="bold" />
           Back
         </Link>
       </motion.div>
@@ -487,7 +487,7 @@ function CreateStaffForm({ departmentName }: { departmentName: string }) {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <IdentificationCardIcon className="size-5 text-primary" weight="duotone" />
+              <IdentificationCardIcon className="mb-1 size-5 text-primary" weight="duotone" />
               Staff Details
             </CardTitle>
             <CardDescription>Staff accounts have view-only access.</CardDescription>
