@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 
 import { db } from "@/db";
+import { redis } from "@/lib/redis";
 
 const FORCE_FLAG = "--force";
 const RESET_SENTINEL = "yes do it";
@@ -35,6 +36,10 @@ async function runMigrations() {
   await $`bun x --bun drizzle-kit migrate`;
 }
 
+async function resetRedis() {
+  await redis.send("FLUSHALL", []);
+}
+
 async function reset() {
   const confirmed = await confirmReset();
 
@@ -48,13 +53,20 @@ async function reset() {
 
   await resetSchema();
 
+  console.log("Clearing Redis cache...");
+  await resetRedis();
+
   console.log("Running migrations...");
   await runMigrations();
   console.log("Database reset complete.");
 }
 
-reset().catch((err) => {
-  console.error("Database reset failed.");
-  console.error(err);
-  process.exit(1);
-});
+reset()
+  .catch((err) => {
+    console.error("Database reset failed.");
+    console.error(err);
+    process.exit(1);
+  })
+  .finally(() => {
+    redis.close();
+  });
