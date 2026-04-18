@@ -27,6 +27,13 @@ export const Route = createFileRoute("/login")({
     }
   },
   component: RouteComponent,
+  head: () => ({
+    meta: [
+      {
+        title: "Login | College Project",
+      },
+    ],
+  }),
 });
 
 const loginSchema = z.object({

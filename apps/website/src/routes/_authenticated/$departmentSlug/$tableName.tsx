@@ -46,6 +46,13 @@ import {
 
 export const Route = createFileRoute("/_authenticated/$departmentSlug/$tableName")({
   component: RouteComponent,
+  head: ({ params }) => ({
+    meta: [
+      {
+        title: `${params.tableName} | College Project`,
+      },
+    ],
+  }),
 });
 
 const authenticatedRoute = getRouteApi("/_authenticated");

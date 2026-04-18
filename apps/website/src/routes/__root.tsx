@@ -1,7 +1,12 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 import { ProgressProvider, useProgress } from "@bprogress/react";
-import { Outlet, createRootRouteWithContext, useRouterState } from "@tanstack/react-router";
+import {
+  HeadContent,
+  Outlet,
+  createRootRouteWithContext,
+  useRouterState,
+} from "@tanstack/react-router";
 import { useEffect, useEffectEvent } from "react";
 
 import { Toaster } from "@/components/ui/sonner";
@@ -33,6 +38,7 @@ function NavigationProgress() {
 function RootLayout() {
   return (
     <>
+      <HeadContent />
       <ProgressProvider color="blue" height="4px">
         <NavigationProgress />
         <Outlet />
@@ -44,4 +50,11 @@ function RootLayout() {
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
+  head: () => ({
+    meta: [
+      {
+        title: "College Project",
+      },
+    ],
+  }),
 });

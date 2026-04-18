@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && pwa-assets-generator --preset minimal-2023 ./public/favicon.svg && vite build",
     "dev": "vite",
     "preview": "vite preview"
   },
@@ -40,6 +40,7 @@
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@vite-pwa/assets-generator": "^1.0.2",
     "@vitejs/plugin-react": "^6.0.1",
     "babel-plugin-react-compiler": "^1.0.0",
     "typescript": "~6.0.2",

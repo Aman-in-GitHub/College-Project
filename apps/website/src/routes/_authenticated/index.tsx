@@ -42,6 +42,13 @@ import {
 
 export const Route = createFileRoute("/_authenticated/")({
   component: RouteComponent,
+  head: () => ({
+    meta: [
+      {
+        title: "Dashboard | College Project",
+      },
+    ],
+  }),
 });
 
 const authenticatedRoute = getRouteApi("/_authenticated");
