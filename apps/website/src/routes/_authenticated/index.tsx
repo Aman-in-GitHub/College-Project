@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
+import { ModeToggle } from "@/components/mode-toggle";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -788,6 +789,9 @@ function RouteComponent() {
           >
             {signOutMutation.isPending ? "Logging out..." : "Logout"}
           </Button>
+          <div className="flex w-full sm:w-auto">
+            <ModeToggle />
+          </div>
         </div>
       </div>
 

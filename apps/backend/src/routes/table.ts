@@ -54,6 +54,14 @@ type TableColumn = {
   isNullable: boolean;
 };
 
+const SYSTEM_TABLE_COLUMN_NAMES = new Set([
+  "id",
+  "created_at",
+  "updated_at",
+  "department_id",
+  "created_by_user_id",
+]);
+
 function normalizeScannedCellValue(value: string, type: NormalizedColumn["type"]): string | null {
   const trimmedValue = value.trim();
 
@@ -131,7 +139,7 @@ function inferEditableColumnType(dataType: string): NormalizedColumn["type"] {
 }
 
 async function getDepartmentTableColumns(tableName: string): Promise<TableColumn[]> {
-  return postgresClient<TableColumn[]>`
+  const columns = await postgresClient<TableColumn[]>`
     SELECT
       column_name AS "columnName",
       data_type AS "dataType",
@@ -140,6 +148,8 @@ async function getDepartmentTableColumns(tableName: string): Promise<TableColumn
     WHERE table_schema = 'public' AND table_name = ${tableName}
     ORDER BY ordinal_position ASC
   `;
+
+  return columns.filter((column) => !SYSTEM_TABLE_COLUMN_NAMES.has(column.columnName));
 }
 
 function quoteTableIdentifier(tableName: string): string {
@@ -194,10 +204,35 @@ function normalizeUpdatedCellValue(value: string | null, dataType: string): stri
 }
 
 function getEditableColumnMap(columns: TableColumn[]): Map<string, TableColumn> {
-  return new Map(
-    columns
-      .filter((column) => column.columnName !== "id")
-      .map((column) => [column.columnName, column]),
+  return new Map(columns.map((column) => [column.columnName, column]));
+}
+
+async function ensureSystemTableColumns(params: {
+  tableName: string;
+  departmentId: string;
+  createdByUserId: string | null;
+}): Promise<void> {
+  const quotedTableName = quoteTableIdentifier(params.tableName);
+  const departmentIdLiteral = toSqlLiteral(params.departmentId);
+  const createdByUserIdLiteral = toSqlLiteral(params.createdByUserId);
+
+  await postgresClient.unsafe(
+    `ALTER TABLE ${quotedTableName} ADD COLUMN IF NOT EXISTS ${quoteIdentifier("created_at")} TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+  );
+  await postgresClient.unsafe(
+    `ALTER TABLE ${quotedTableName} ADD COLUMN IF NOT EXISTS ${quoteIdentifier("updated_at")} TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+  );
+  await postgresClient.unsafe(
+    `ALTER TABLE ${quotedTableName} ADD COLUMN IF NOT EXISTS ${quoteIdentifier("department_id")} TEXT`,
+  );
+  await postgresClient.unsafe(
+    `ALTER TABLE ${quotedTableName} ADD COLUMN IF NOT EXISTS ${quoteIdentifier("created_by_user_id")} TEXT`,
+  );
+  await postgresClient.unsafe(
+    `UPDATE ${quotedTableName} SET ${quoteIdentifier("department_id")} = ${departmentIdLiteral} WHERE ${quoteIdentifier("department_id")} IS NULL`,
+  );
+  await postgresClient.unsafe(
+    `UPDATE ${quotedTableName} SET ${quoteIdentifier("created_by_user_id")} = ${createdByUserIdLiteral} WHERE ${quoteIdentifier("created_by_user_id")} IS NULL`,
   );
 }
 
@@ -212,12 +247,18 @@ async function deleteTableRowById(tableName: string, rowId: string): Promise<boo
 
 function buildInsertRowsStatement(
   tableName: string,
+  departmentId: string,
+  createdByUserId: string | null,
   columns: NormalizedColumn[],
   rows: string[][],
 ) {
   const columnIdentifiers = sql.join(
     [
       sql.raw(quoteIdentifier("id")),
+      sql.raw(quoteIdentifier("created_at")),
+      sql.raw(quoteIdentifier("updated_at")),
+      sql.raw(quoteIdentifier("department_id")),
+      sql.raw(quoteIdentifier("created_by_user_id")),
       ...columns.map((column) => sql.raw(quoteIdentifier(column.normalizedName))),
     ],
     sql`, `,
@@ -228,6 +269,10 @@ function buildInsertRowsStatement(
       sql`(${sql.join(
         [
           sql`${nanoid(32)}`,
+          sql`NOW()`,
+          sql`NOW()`,
+          sql`${departmentId}`,
+          sql`${createdByUserId}`,
           ...columns.map((column, columnIndex) => {
             return sql`${normalizeScannedCellValue(row[columnIndex] ?? "", column.type)}`;
           }),
@@ -240,6 +285,92 @@ function buildInsertRowsStatement(
     rowTuples,
     sql`, `,
   )};`;
+}
+
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let currentCell = "";
+  let isInsideQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const currentCharacter = line[index] ?? "";
+    const nextCharacter = line[index + 1] ?? "";
+
+    if (currentCharacter === '"') {
+      if (isInsideQuotes && nextCharacter === '"') {
+        currentCell += '"';
+        index += 1;
+        continue;
+      }
+
+      isInsideQuotes = !isInsideQuotes;
+      continue;
+    }
+
+    if (currentCharacter === "," && !isInsideQuotes) {
+      cells.push(currentCell);
+      currentCell = "";
+      continue;
+    }
+
+    currentCell += currentCharacter;
+  }
+
+  cells.push(currentCell);
+
+  return cells.map((cell) => cell.trim());
+}
+
+function parseCsvContent(content: string): string[][] {
+  const normalizedContent = content
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+  const lines = normalizedContent
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0);
+
+  return lines.map((line) => parseCsvLine(line));
+}
+
+async function insertEditableRows(params: {
+  tableName: string;
+  departmentId: string;
+  createdByUserId: string | null;
+  editableColumns: TableColumn[];
+  rows: Array<Array<string | null>>;
+}): Promise<number> {
+  if (params.rows.length === 0) {
+    return 0;
+  }
+
+  const columnIdentifiers = [
+    quoteIdentifier("id"),
+    quoteIdentifier("created_at"),
+    quoteIdentifier("updated_at"),
+    quoteIdentifier("department_id"),
+    quoteIdentifier("created_by_user_id"),
+    ...params.editableColumns.map((column) => quoteIdentifier(column.columnName)),
+  ];
+  const rowValues = params.rows.map((row) => {
+    return [
+      toSqlLiteral(nanoid(32)),
+      "NOW()",
+      "NOW()",
+      toSqlLiteral(params.departmentId),
+      toSqlLiteral(params.createdByUserId),
+      ...params.editableColumns.map((_, columnIndex) => toSqlLiteral(row[columnIndex] ?? null)),
+    ];
+  });
+
+  await postgresClient.unsafe(
+    `INSERT INTO ${quoteTableIdentifier(params.tableName)} (${columnIdentifiers.join(", ")}) VALUES ${rowValues
+      .map((row) => `(${row.join(", ")})`)
+      .join(", ")}`,
+  );
+
+  return params.rows.length;
 }
 
 export const tableRoutes = new Hono<AppEnv>();
@@ -291,6 +422,7 @@ tableRoutes.get("/api/tables", requireDepartmentStaff, async (c) => {
 
 tableRoutes.get("/api/tables/:tableName", requireDepartmentStaff, async (c) => {
   const department = c.get("department");
+  const user = c.get("user");
   const tableName = c.req.param("tableName");
   const parsedQuery = TABLE_QUERY_SCHEMA.safeParse(c.req.query());
 
@@ -334,6 +466,12 @@ tableRoutes.get("/api/tables/:tableName", requireDepartmentStaff, async (c) => {
     );
   }
 
+  await ensureSystemTableColumns({
+    tableName: normalizedDepartmentTableName,
+    departmentId: department.id,
+    createdByUserId: user?.id ?? null,
+  });
+
   const columns = await getDepartmentTableColumns(normalizedDepartmentTableName);
 
   if (columns.length === 0) {
@@ -360,7 +498,7 @@ tableRoutes.get("/api/tables/:tableName", requireDepartmentStaff, async (c) => {
 
   const typedRowsQuery = postgresClient<Record<string, string | number | boolean | null>[]>;
   const rows = await typedRowsQuery.unsafe(
-    `SELECT * FROM ${quotedTableName} ${whereClause} ORDER BY "id" LIMIT ${pageSize} OFFSET ${offset}`,
+    `SELECT * FROM ${quotedTableName} ${whereClause} ORDER BY ${quoteIdentifier("updated_at")} DESC, "id" ASC LIMIT ${pageSize} OFFSET ${offset}`,
   );
 
   return c.json(
@@ -390,6 +528,7 @@ tableRoutes.get("/api/tables/:tableName", requireDepartmentStaff, async (c) => {
 
 tableRoutes.patch("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin, async (c) => {
   const department = c.get("department");
+  const user = c.get("user");
   const tableName = c.req.param("tableName");
   const rowId = c.req.param("rowId");
   const payload = await c.req.json().catch(() => null);
@@ -434,6 +573,12 @@ tableRoutes.patch("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin, 
       400,
     );
   }
+
+  await ensureSystemTableColumns({
+    tableName: normalizedDepartmentTableName,
+    departmentId: department.id,
+    createdByUserId: user?.id ?? null,
+  });
 
   const columns = await getDepartmentTableColumns(normalizedDepartmentTableName);
 
@@ -500,7 +645,7 @@ tableRoutes.patch("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin, 
   const quotedTableName = quoteTableIdentifier(normalizedDepartmentTableName);
 
   await postgresClient.unsafe(
-    `UPDATE ${quotedTableName} SET ${setClause} WHERE "id" = ${toSqlLiteral(rowId)}`,
+    `UPDATE ${quotedTableName} SET ${setClause}, ${quoteIdentifier("updated_at")} = NOW() WHERE "id" = ${toSqlLiteral(rowId)}`,
   );
 
   return c.json(
@@ -517,6 +662,7 @@ tableRoutes.patch("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin, 
 
 tableRoutes.post("/api/tables/:tableName/rows", requireDepartmentAdmin, async (c) => {
   const department = c.get("department");
+  const user = c.get("user");
   const tableName = c.req.param("tableName");
   const payload = await c.req.json().catch(() => null);
   const parsedPayload = CREATE_TABLE_ROW_SCHEMA.safeParse(payload);
@@ -561,6 +707,12 @@ tableRoutes.post("/api/tables/:tableName/rows", requireDepartmentAdmin, async (c
     );
   }
 
+  await ensureSystemTableColumns({
+    tableName: normalizedDepartmentTableName,
+    departmentId: department.id,
+    createdByUserId: user?.id ?? null,
+  });
+
   const columns = await getDepartmentTableColumns(normalizedDepartmentTableName);
 
   if (columns.length === 0) {
@@ -576,7 +728,9 @@ tableRoutes.post("/api/tables/:tableName/rows", requireDepartmentAdmin, async (c
 
   const quotedTableName = quoteTableIdentifier(normalizedDepartmentTableName);
   const rowId = nanoid(32);
-  const editableColumns = columns.filter((column) => column.columnName !== "id");
+  const editableColumns = columns.filter(
+    (column) => !SYSTEM_TABLE_COLUMN_NAMES.has(column.columnName),
+  );
   const editableColumnMap = getEditableColumnMap(columns);
   const normalizedEntries = Object.entries(parsedPayload.data.values)
     .map(([columnName, value]) => {
@@ -633,10 +787,18 @@ tableRoutes.post("/api/tables/:tableName/rows", requireDepartmentAdmin, async (c
   );
   const insertColumns = [
     quoteIdentifier("id"),
+    quoteIdentifier("created_at"),
+    quoteIdentifier("updated_at"),
+    quoteIdentifier("department_id"),
+    quoteIdentifier("created_by_user_id"),
     ...editableColumns.map((column) => quoteIdentifier(column.columnName)),
   ];
   const insertValues = [
     toSqlLiteral(rowId),
+    "NOW()",
+    "NOW()",
+    toSqlLiteral(department.id),
+    toSqlLiteral(user?.id ?? null),
     ...editableColumns.map((column) => toSqlLiteral(valuesByColumn.get(column.columnName) ?? null)),
   ];
 
@@ -658,6 +820,7 @@ tableRoutes.post("/api/tables/:tableName/rows", requireDepartmentAdmin, async (c
 
 tableRoutes.delete("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin, async (c) => {
   const department = c.get("department");
+  const user = c.get("user");
   const tableName = c.req.param("tableName");
   const rowId = c.req.param("rowId");
 
@@ -684,6 +847,12 @@ tableRoutes.delete("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin,
       400,
     );
   }
+
+  await ensureSystemTableColumns({
+    tableName: normalizedDepartmentTableName,
+    departmentId: department.id,
+    createdByUserId: user?.id ?? null,
+  });
 
   const columns = await getDepartmentTableColumns(normalizedDepartmentTableName);
 
@@ -724,6 +893,7 @@ tableRoutes.delete("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin,
 tableRoutes.post("/api/tables/:tableName/import-image", requireDepartmentAdmin, async (c) => {
   const reqLogger = c.get("logger");
   const department = c.get("department");
+  const user = c.get("user");
   const tableName = c.req.param("tableName");
   const body = await c.req.parseBody();
   const maybeFile = body.file;
@@ -775,6 +945,12 @@ tableRoutes.post("/api/tables/:tableName/import-image", requireDepartmentAdmin, 
     );
   }
 
+  await ensureSystemTableColumns({
+    tableName: normalizedDepartmentTableName,
+    departmentId: department.id,
+    createdByUserId: user?.id ?? null,
+  });
+
   const columns = await getDepartmentTableColumns(normalizedDepartmentTableName);
 
   if (columns.length === 0) {
@@ -788,7 +964,9 @@ tableRoutes.post("/api/tables/:tableName/import-image", requireDepartmentAdmin, 
     );
   }
 
-  const editableColumns = columns.filter((column) => column.columnName !== "id");
+  const editableColumns = columns.filter(
+    (column) => !SYSTEM_TABLE_COLUMN_NAMES.has(column.columnName),
+  );
   const scannedRows = await scanExistingTableRowsWithGemini({
     file,
     logger: reqLogger,
@@ -832,24 +1010,19 @@ tableRoutes.post("/api/tables/:tableName/import-image", requireDepartmentAdmin, 
     );
   }
 
-  const columnIdentifiers = [
-    quoteIdentifier("id"),
-    ...editableColumns.map((column) => quoteIdentifier(column.columnName)),
-  ];
-  const rowValues = scannedRows.map((row) => {
-    return [
-      toSqlLiteral(nanoid(32)),
-      ...editableColumns.map((column, columnIndex) =>
-        toSqlLiteral(normalizeUpdatedCellValue(row[columnIndex] ?? "", column.dataType)),
-      ),
-    ];
-  });
-
-  await postgresClient.unsafe(
-    `INSERT INTO ${quoteTableIdentifier(normalizedDepartmentTableName)} (${columnIdentifiers.join(", ")}) VALUES ${rowValues
-      .map((row) => `(${row.join(", ")})`)
-      .join(", ")}`,
+  const normalizedRows = scannedRows.map((row) =>
+    editableColumns.map((column, columnIndex) =>
+      normalizeUpdatedCellValue(row[columnIndex] ?? "", column.dataType),
+    ),
   );
+
+  await insertEditableRows({
+    tableName: normalizedDepartmentTableName,
+    departmentId: department.id,
+    createdByUserId: user?.id ?? null,
+    editableColumns,
+    rows: normalizedRows,
+  });
 
   return c.json(
     {
@@ -857,6 +1030,190 @@ tableRoutes.post("/api/tables/:tableName/import-image", requireDepartmentAdmin, 
       message: `${scannedRows.length} row(s) imported successfully.`,
       data: {
         insertedRowCount: scannedRows.length,
+      },
+    },
+    201,
+  );
+});
+
+tableRoutes.post("/api/tables/:tableName/import-csv", requireDepartmentAdmin, async (c) => {
+  const department = c.get("department");
+  const user = c.get("user");
+  const tableName = c.req.param("tableName");
+  const body = await c.req.parseBody();
+  const maybeFile = body.file;
+  const file = Array.isArray(maybeFile) ? maybeFile[0] : maybeFile;
+
+  if (!(file instanceof File)) {
+    return c.json(
+      {
+        success: false,
+        message: "Missing file field in multipart request",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  const isCsvFile =
+    file.type === "text/csv" ||
+    file.name.toLowerCase().endsWith(".csv") ||
+    file.type === "application/vnd.ms-excel";
+
+  if (!isCsvFile) {
+    return c.json(
+      {
+        success: false,
+        message: "Only CSV files are supported",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  if (!department) {
+    return c.json(
+      {
+        success: false,
+        message: "Department context is required.",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  const normalizedDepartmentTableName = buildDepartmentTableName(department.slug, tableName);
+
+  if (!normalizedDepartmentTableName) {
+    return c.json(
+      {
+        success: false,
+        message: "Invalid table name.",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  await ensureSystemTableColumns({
+    tableName: normalizedDepartmentTableName,
+    departmentId: department.id,
+    createdByUserId: user?.id ?? null,
+  });
+
+  const columns = await getDepartmentTableColumns(normalizedDepartmentTableName);
+
+  if (columns.length === 0) {
+    return c.json(
+      {
+        success: false,
+        message: "Table not found.",
+        data: null,
+      },
+      404,
+    );
+  }
+
+  const editableColumns = columns.filter(
+    (column) => !SYSTEM_TABLE_COLUMN_NAMES.has(column.columnName),
+  );
+  const csvContent = await file.text();
+  const parsedRows = parseCsvContent(csvContent);
+
+  if (parsedRows.length < 2) {
+    return c.json(
+      {
+        success: false,
+        message: "CSV file must include headers and at least one row.",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  const headerRow = parsedRows[0];
+  const dataRows = parsedRows.slice(1);
+
+  if (!headerRow) {
+    return c.json(
+      {
+        success: false,
+        message: "CSV file must include a header row.",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  const normalizedHeaders = headerRow.map((header) => normalizeIdentifier(header));
+  const expectedHeaders = editableColumns.map((column) => column.columnName);
+
+  if (
+    normalizedHeaders.length !== expectedHeaders.length ||
+    normalizedHeaders.some((header, index) => header !== expectedHeaders[index])
+  ) {
+    return c.json(
+      {
+        success: false,
+        message: "CSV headers must match the table columns exactly and in the same order.",
+        data: {
+          expectedHeaders,
+        },
+      },
+      400,
+    );
+  }
+
+  const normalizedRows = dataRows
+    .map((row) =>
+      editableColumns.map((column, columnIndex) =>
+        normalizeUpdatedCellValue(row[columnIndex] ?? "", column.dataType),
+      ),
+    )
+    .filter((row) => row.some((value) => value !== null));
+
+  if (normalizedRows.length === 0) {
+    return c.json(
+      {
+        success: false,
+        message: "CSV file does not contain any non-empty rows.",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  if (
+    normalizedRows.some((row) =>
+      editableColumns.some(
+        (column, columnIndex) => !column.isNullable && row[columnIndex] === null,
+      ),
+    )
+  ) {
+    return c.json(
+      {
+        success: false,
+        message: "Required fields are missing in one or more CSV rows.",
+        data: null,
+      },
+      400,
+    );
+  }
+
+  const insertedRowCount = await insertEditableRows({
+    tableName: normalizedDepartmentTableName,
+    departmentId: department.id,
+    createdByUserId: user?.id ?? null,
+    editableColumns,
+    rows: normalizedRows,
+  });
+
+  return c.json(
+    {
+      success: true,
+      message: `${insertedRowCount} row(s) imported successfully from CSV.`,
+      data: {
+        insertedRowCount,
       },
     },
     201,
@@ -946,6 +1303,7 @@ tableRoutes.post("/api/table/scan", requireDepartmentAdmin, async (c) => {
 tableRoutes.post("/api/table/create", requireDepartmentAdmin, async (c) => {
   const reqLogger = c.get("logger");
   const department = c.get("department");
+  const user = c.get("user");
   const payload = await c.req.json().catch(() => null);
   const parsed = CREATE_TABLE_REQUEST_SCHEMA.safeParse(payload);
 
@@ -1108,6 +1466,10 @@ tableRoutes.post("/api/table/create", requireDepartmentAdmin, async (c) => {
 
   const columnDefinitions = [
     `${quoteIdentifier("id")} TEXT PRIMARY KEY`,
+    `${quoteIdentifier("created_at")} TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+    `${quoteIdentifier("updated_at")} TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+    `${quoteIdentifier("department_id")} TEXT NOT NULL`,
+    `${quoteIdentifier("created_by_user_id")} TEXT`,
     ...normalizedColumns.map((column) => {
       const sqlType = PG_TYPE_BY_DB_TYPE[column.type];
       return `${quoteIdentifier(column.normalizedName)} ${sqlType}${column.isRequired ? " NOT NULL" : ""}`;
@@ -1172,9 +1534,21 @@ tableRoutes.post("/api/table/create", requireDepartmentAdmin, async (c) => {
     await db.transaction(async (tx) => {
       await tx.execute(sql.raw(createTableStatement));
 
+      await ensureSystemTableColumns({
+        tableName: normalizedTableName,
+        departmentId: department.id,
+        createdByUserId: user?.id ?? null,
+      });
+
       if (parsed.data.fillData && rowsToInsert.length > 0) {
         await tx.execute(
-          buildInsertRowsStatement(normalizedTableName, normalizedColumns, rowsToInsert),
+          buildInsertRowsStatement(
+            normalizedTableName,
+            department.id,
+            user?.id ?? null,
+            normalizedColumns,
+            rowsToInsert,
+          ),
         );
       }
     });

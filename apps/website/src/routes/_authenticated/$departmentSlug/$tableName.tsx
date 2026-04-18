@@ -228,6 +228,16 @@ function formatCellValue(value: TableValue): string {
   return String(value);
 }
 
+function formatTableDisplayValue(columnName: string, value: TableValue): string {
+  const formattedValue = formatCellValue(value);
+
+  if (columnName === "id" && formattedValue.length > 10) {
+    return `${formattedValue.slice(0, 10)}...`;
+  }
+
+  return formattedValue;
+}
+
 function exportRowsToFile(params: {
   columns: TableColumn[];
   rows: TableRowData[];
@@ -277,7 +287,7 @@ function EditableTableCell({
   onDraftChange,
 }: EditableTableCellProps) {
   if (!canEdit || columnName === "id") {
-    return <span>{formatCellValue(originalValue) || "-"}</span>;
+    return <span>{formatTableDisplayValue(columnName, originalValue) || "-"}</span>;
   }
 
   return (
@@ -433,6 +443,40 @@ async function importTableRowsFromImage(params: {
   return body;
 }
 
+async function importTableRowsFromCsv(params: {
+  departmentSlug: string;
+  tableName: string;
+  file: File;
+}): Promise<ImportRowsResponse> {
+  const formData = new FormData();
+  formData.append("file", params.file, params.file.name);
+
+  const { response, body } = await fetchApiJson(
+    `${env.VITE_SERVER_URL}/api/tables/${encodeURIComponent(params.tableName)}/import-csv`,
+    {
+      method: "POST",
+      headers: {
+        "x-department-slug": params.departmentSlug,
+      },
+      body: formData,
+    },
+  );
+
+  if (!response.ok) {
+    if (isRecord(body) && typeof body.message === "string") {
+      throw new Error(body.message);
+    }
+
+    throw new Error("Failed to import rows from CSV.");
+  }
+
+  if (!isImportRowsResponse(body)) {
+    throw new Error("Invalid CSV import response.");
+  }
+
+  return body;
+}
+
 async function deleteTableRow(params: {
   departmentSlug: string;
   tableName: string;
@@ -485,6 +529,7 @@ function RouteComponent() {
   const editedRowsRef = useRef(editedRows);
   const importCameraInputRef = useRef<HTMLInputElement | null>(null);
   const importUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const importCsvInputRef = useRef<HTMLInputElement | null>(null);
   editedRowsRef.current = editedRows;
 
   useEffect(() => {
@@ -556,12 +601,42 @@ function RouteComponent() {
         importUploadInputRef.current.value = "";
       }
 
+      if (importCsvInputRef.current) {
+        importCsvInputRef.current.value = "";
+      }
+
       void queryClient.invalidateQueries({
         queryKey: tableQueryKey,
       });
     },
     onError: (error) => {
       showErrorToast(error instanceof Error ? error.message : "Failed to import rows.");
+    },
+  });
+  const importCsvMutation = useMutation({
+    mutationFn: importTableRowsFromCsv,
+    onSuccess: (payload) => {
+      showSuccessToast(payload.message);
+      setSelectedImportFile(null);
+
+      if (importCameraInputRef.current) {
+        importCameraInputRef.current.value = "";
+      }
+
+      if (importUploadInputRef.current) {
+        importUploadInputRef.current.value = "";
+      }
+
+      if (importCsvInputRef.current) {
+        importCsvInputRef.current.value = "";
+      }
+
+      void queryClient.invalidateQueries({
+        queryKey: tableQueryKey,
+      });
+    },
+    onError: (error) => {
+      showErrorToast(error instanceof Error ? error.message : "Failed to import CSV rows.");
     },
   });
   const deleteRowMutation = useMutation({
@@ -753,6 +828,20 @@ function RouteComponent() {
     if (inputId === "table-import-upload" && importCameraInputRef.current) {
       importCameraInputRef.current.value = "";
     }
+
+    if (inputId === "table-import-csv") {
+      if (importCameraInputRef.current) {
+        importCameraInputRef.current.value = "";
+      }
+
+      if (importUploadInputRef.current) {
+        importUploadInputRef.current.value = "";
+      }
+    }
+
+    if (inputId !== "table-import-csv" && importCsvInputRef.current) {
+      importCsvInputRef.current.value = "";
+    }
   }
 
   function handleClearImportSelection() {
@@ -765,11 +854,30 @@ function RouteComponent() {
     if (importUploadInputRef.current) {
       importUploadInputRef.current.value = "";
     }
+
+    if (importCsvInputRef.current) {
+      importCsvInputRef.current.value = "";
+    }
   }
 
   function handleImportRows() {
     if (!selectedImportFile) {
-      showWarningToast("Please take or upload a photo first.");
+      showWarningToast("Please take or upload a file first.");
+      return;
+    }
+
+    const isCsvFile =
+      selectedImportFile.type === "text/csv" ||
+      selectedImportFile.type === "application/vnd.ms-excel" ||
+      selectedImportFile.name.toLowerCase().endsWith(".csv");
+
+    if (isCsvFile) {
+      void importCsvMutation.mutateAsync({
+        departmentSlug: params.departmentSlug,
+        tableName: params.tableName,
+        file: selectedImportFile,
+      });
+
       return;
     }
 
@@ -893,13 +1001,13 @@ function RouteComponent() {
           {canEdit ? (
             <div className="flex flex-col gap-4 border p-4">
               <div className="flex flex-col gap-1">
-                <div className="text-sm font-medium">Import Rows From Image</div>
+                <div className="text-sm font-medium">Import Rows</div>
                 <div className="text-sm text-muted-foreground">
-                  Upload a photo of the same table format and add only row data to this table.
+                  Upload a photo or CSV file that matches this table and add only row data.
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4 md:grid-cols-3">
                 <div className="flex flex-col gap-2">
                   <label htmlFor="table-import-camera" className="text-sm font-medium">
                     Take Photo
@@ -925,9 +1033,21 @@ function RouteComponent() {
                     onChange={handleImportFileSelect}
                   />
                 </div>
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="table-import-csv" className="text-sm font-medium">
+                    Upload CSV
+                  </label>
+                  <Input
+                    id="table-import-csv"
+                    ref={importCsvInputRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    onChange={handleImportFileSelect}
+                  />
+                </div>
               </div>
 
-              {importPreviewUrl ? (
+              {importPreviewUrl && selectedImportFile?.type.startsWith("image/") ? (
                 <img
                   src={importPreviewUrl}
                   alt="Selected rows import preview"
@@ -939,10 +1059,16 @@ function RouteComponent() {
                 <Button
                   type="button"
                   className="w-full sm:w-auto"
-                  disabled={!selectedImportFile || importRowsMutation.isPending}
+                  disabled={
+                    !selectedImportFile ||
+                    importRowsMutation.isPending ||
+                    importCsvMutation.isPending
+                  }
                   onClick={handleImportRows}
                 >
-                  {importRowsMutation.isPending ? "Importing..." : "Import Rows"}
+                  {importRowsMutation.isPending || importCsvMutation.isPending
+                    ? "Importing..."
+                    : "Import Rows"}
                 </Button>
                 <Button
                   type="button"
