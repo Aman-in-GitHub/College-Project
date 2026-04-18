@@ -1,5 +1,6 @@
 import { useForm } from "@tanstack/react-form";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { motion, useReducedMotion } from "motion/react";
 import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { authClient } from "@/lib/auth";
-import { showErrorToast, showSuccessToast } from "@/lib/utils";
+import { getEnterAnimationProps, showErrorToast, showSuccessToast } from "@/lib/utils";
 
 export const Route = createFileRoute("/login")({
   beforeLoad: async () => {
@@ -36,6 +37,7 @@ const loginSchema = z.object({
 
 function RouteComponent() {
   const navigate = useNavigate();
+  const isReducedMotion = useReducedMotion() === true;
 
   const form = useForm({
     defaultValues: {
@@ -66,117 +68,129 @@ function RouteComponent() {
   });
 
   return (
-    <main className="flex min-h-svh flex-col items-center justify-center">
+    <motion.main
+      className="flex min-h-svh flex-col items-center justify-center"
+      {...getEnterAnimationProps(isReducedMotion, 0)}
+    >
       <div className="flex w-full max-w-7xl flex-col gap-2">
-        <Card className="overflow-hidden p-0">
-          <CardContent className="grid p-0 md:grid-cols-2">
-            <form
-              className="p-6 md:p-8"
-              onSubmit={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                void form.handleSubmit();
-              }}
-            >
-              <FieldGroup>
-                <div className="flex flex-col items-center gap-2 text-center">
-                  <h1 className="text-2xl font-bold">Welcome back</h1>
-                  <p className="text-balance text-muted-foreground">Login to your account</p>
-                </div>
+        <motion.div {...getEnterAnimationProps(isReducedMotion, 0.04, 16)}>
+          <Card className="overflow-hidden p-0">
+            <CardContent className="grid p-0 md:grid-cols-2">
+              <motion.form
+                className="p-6 md:p-8"
+                {...getEnterAnimationProps(isReducedMotion, 0.08)}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void form.handleSubmit();
+                }}
+              >
+                <FieldGroup>
+                  <motion.div
+                    className="flex flex-col items-center gap-2 text-center"
+                    {...getEnterAnimationProps(isReducedMotion, 0.12)}
+                  >
+                    <h1 className="text-2xl font-bold">Welcome back</h1>
+                    <p className="text-balance text-muted-foreground">Login to your account</p>
+                  </motion.div>
 
-                <form.Field name="email">
-                  {(field) => {
-                    const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                  <form.Field name="email">
+                    {(field) => {
+                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
 
-                    return (
-                      <Field data-invalid={isInvalid}>
-                        <FieldLabel htmlFor={field.name}>Email</FieldLabel>
-                        <Input
-                          id={field.name}
-                          name={field.name}
-                          type="email"
-                          placeholder="aman@gmail.com"
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(e) => field.handleChange(e.target.value)}
-                          aria-invalid={isInvalid}
-                        />
+                      return (
+                        <Field data-invalid={isInvalid}>
+                          <FieldLabel htmlFor={field.name}>Email</FieldLabel>
+                          <Input
+                            id={field.name}
+                            name={field.name}
+                            type="email"
+                            placeholder="aman@gmail.com"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            aria-invalid={isInvalid}
+                          />
 
-                        {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
+                          {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
+                        </Field>
+                      );
+                    }}
+                  </form.Field>
+
+                  <form.Field name="password">
+                    {(field) => {
+                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+
+                      return (
+                        <Field data-invalid={isInvalid}>
+                          <FieldLabel htmlFor={field.name}>Password</FieldLabel>
+                          <Input
+                            id={field.name}
+                            name={field.name}
+                            type="password"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            aria-invalid={isInvalid}
+                          />
+
+                          {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
+                        </Field>
+                      );
+                    }}
+                  </form.Field>
+
+                  <form.Field name="isRemembered">
+                    {(field) => (
+                      <Field>
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id={field.name}
+                            checked={field.state.value}
+                            onCheckedChange={(checked) => field.handleChange(checked === true)}
+                            aria-invalid={!field.state.meta.isValid}
+                          />
+                          <FieldLabel htmlFor={field.name}>Remember me</FieldLabel>
+                        </div>
                       </Field>
-                    );
-                  }}
-                </form.Field>
+                    )}
+                  </form.Field>
 
-                <form.Field name="password">
-                  {(field) => {
-                    const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-
-                    return (
-                      <Field data-invalid={isInvalid}>
-                        <FieldLabel htmlFor={field.name}>Password</FieldLabel>
-                        <Input
-                          id={field.name}
-                          name={field.name}
-                          type="password"
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(e) => field.handleChange(e.target.value)}
-                          aria-invalid={isInvalid}
-                        />
-
-                        {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
+                  <form.Subscribe selector={(state) => [state.canSubmit, state.isSubmitting]}>
+                    {([canSubmit, isSubmitting]) => (
+                      <Field>
+                        <Button type="submit" disabled={!canSubmit}>
+                          {isSubmitting ? "Logging in..." : "Login"}
+                        </Button>
                       </Field>
-                    );
-                  }}
-                </form.Field>
+                    )}
+                  </form.Subscribe>
 
-                <form.Field name="isRemembered">
-                  {(field) => (
-                    <Field>
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id={field.name}
-                          checked={field.state.value}
-                          onCheckedChange={(checked) => field.handleChange(checked === true)}
-                          aria-invalid={!field.state.meta.isValid}
-                        />
-                        <FieldLabel htmlFor={field.name}>Remember me</FieldLabel>
-                      </div>
-                    </Field>
-                  )}
-                </form.Field>
+                  <FieldSeparator className="*:data-[slot=field-separator-content]:bg-card">
+                    Or
+                  </FieldSeparator>
 
-                <form.Subscribe selector={(state) => [state.canSubmit, state.isSubmitting]}>
-                  {([canSubmit, isSubmitting]) => (
-                    <Field>
-                      <Button type="submit" disabled={!canSubmit}>
-                        {isSubmitting ? "Logging in..." : "Login"}
-                      </Button>
-                    </Field>
-                  )}
-                </form.Subscribe>
+                  <FieldDescription className="text-center">
+                    Don&apos;t have an account? <a href="#">Sign up</a>
+                  </FieldDescription>
+                </FieldGroup>
+              </motion.form>
 
-                <FieldSeparator className="*:data-[slot=field-separator-content]:bg-card">
-                  Or
-                </FieldSeparator>
-
-                <FieldDescription className="text-center">
-                  Don&apos;t have an account? <a href="#">Sign up</a>
-                </FieldDescription>
-              </FieldGroup>
-            </form>
-
-            <div className="relative hidden bg-muted md:block">
-              <img
-                src="/login.svg"
-                alt="Login illustration"
-                className="absolute inset-0 h-full w-full object-contain dark:brightness-[0.2] dark:grayscale"
-              />
-            </div>
-          </CardContent>
-        </Card>
+              <motion.div
+                className="relative hidden bg-muted md:block"
+                {...getEnterAnimationProps(isReducedMotion, 0.14, 20)}
+              >
+                <img
+                  src="/login.svg"
+                  alt="Login illustration"
+                  className="absolute inset-0 h-full w-full object-contain dark:brightness-[0.2] dark:grayscale"
+                />
+              </motion.div>
+            </CardContent>
+          </Card>
+        </motion.div>
       </div>
-    </main>
+    </motion.main>
   );
 }

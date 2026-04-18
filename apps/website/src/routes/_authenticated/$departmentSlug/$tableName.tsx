@@ -7,6 +7,7 @@ import {
   type PaginationState,
   useReactTable,
 } from "@tanstack/react-table";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useEffectEvent, useMemo, useRef, useState, type ChangeEvent } from "react";
 
 import { buttonVariants, Button } from "@/components/ui/button";
@@ -33,6 +34,8 @@ import {
   buildExportFilename,
   exportRecordsFile,
   fetchApiJson,
+  getEnterAnimationProps,
+  getExitAnimationProps,
   isRecord,
   showErrorToast,
   showInfoToast,
@@ -510,6 +513,7 @@ async function deleteTableRow(params: {
 function RouteComponent() {
   const { accessContext } = authenticatedRoute.useRouteContext();
   const params = Route.useParams();
+  const isReducedMotion = useReducedMotion() === true;
   const queryClient = useQueryClient();
   const tableQueryKey = ["table-page", params.departmentSlug, params.tableName] as const;
   const department = accessContext.department;
@@ -974,8 +978,14 @@ function RouteComponent() {
   });
 
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <motion.main
+      className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6"
+      {...getEnterAnimationProps(isReducedMotion)}
+    >
+      <motion.div
+        className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
+        {...getEnterAnimationProps(isReducedMotion, 0.03)}
+      >
         <div className="flex flex-col gap-1">
           <h1 className="text-xl font-semibold">{params.tableName}</h1>
           <p className="text-sm text-muted-foreground">
@@ -986,283 +996,289 @@ function RouteComponent() {
         <Link to="/" className={buttonVariants({ variant: "default" })}>
           Back
         </Link>
-      </div>
+      </motion.div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Table Data</CardTitle>
-          <CardDescription>
-            {canEdit
-              ? "Department admins can add and update row values directly in the table."
-              : "Department staff can view table data only."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {canEdit ? (
-            <div className="flex flex-col gap-4 border p-4">
-              <div className="flex flex-col gap-1">
-                <div className="text-sm font-medium">Import Rows</div>
-                <div className="text-sm text-muted-foreground">
-                  Upload a photo or CSV file that matches this table and add only row data.
+      <motion.div {...getEnterAnimationProps(isReducedMotion, 0.06, 14)}>
+        <Card>
+          <CardHeader>
+            <CardTitle>Table Data</CardTitle>
+            <CardDescription>
+              {canEdit
+                ? "Department admins can add and update row values directly in the table."
+                : "Department staff can view table data only."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            {canEdit ? (
+              <div className="flex flex-col gap-4 border p-4">
+                <div className="flex flex-col gap-1">
+                  <div className="text-sm font-medium">Import Rows</div>
+                  <div className="text-sm text-muted-foreground">
+                    Upload a photo or CSV file that matches this table and add only row data.
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="flex flex-col gap-2">
+                    <label htmlFor="table-import-camera" className="text-sm font-medium">
+                      Take Photo
+                    </label>
+                    <Input
+                      id="table-import-camera"
+                      ref={importCameraInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handleImportFileSelect}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label htmlFor="table-import-upload" className="text-sm font-medium">
+                      Upload Photo
+                    </label>
+                    <Input
+                      id="table-import-upload"
+                      ref={importUploadInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImportFileSelect}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label htmlFor="table-import-csv" className="text-sm font-medium">
+                      Upload CSV
+                    </label>
+                    <Input
+                      id="table-import-csv"
+                      ref={importCsvInputRef}
+                      type="file"
+                      accept=".csv,text/csv"
+                      onChange={handleImportFileSelect}
+                    />
+                  </div>
+                </div>
+
+                <AnimatePresence initial={false}>
+                  {importPreviewUrl && selectedImportFile?.type.startsWith("image/") ? (
+                    <motion.img
+                      key="import-preview"
+                      src={importPreviewUrl}
+                      alt="Selected rows import preview"
+                      className="max-h-80 w-full object-contain"
+                      {...getExitAnimationProps(isReducedMotion, 10)}
+                    />
+                  ) : null}
+                </AnimatePresence>
+
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <Button
+                    type="button"
+                    className="w-full sm:w-auto"
+                    disabled={
+                      !selectedImportFile ||
+                      importRowsMutation.isPending ||
+                      importCsvMutation.isPending
+                    }
+                    onClick={handleImportRows}
+                  >
+                    {importRowsMutation.isPending || importCsvMutation.isPending
+                      ? "Importing..."
+                      : "Import Rows"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    disabled={!selectedImportFile && !importPreviewUrl}
+                    onClick={handleClearImportSelection}
+                  >
+                    Clear
+                  </Button>
                 </div>
               </div>
+            ) : null}
 
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="flex flex-col gap-2">
-                  <label htmlFor="table-import-camera" className="text-sm font-medium">
-                    Take Photo
-                  </label>
-                  <Input
-                    id="table-import-camera"
-                    ref={importCameraInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handleImportFileSelect}
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <label htmlFor="table-import-upload" className="text-sm font-medium">
-                    Upload Photo
-                  </label>
-                  <Input
-                    id="table-import-upload"
-                    ref={importUploadInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImportFileSelect}
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <label htmlFor="table-import-csv" className="text-sm font-medium">
-                    Upload CSV
-                  </label>
-                  <Input
-                    id="table-import-csv"
-                    ref={importCsvInputRef}
-                    type="file"
-                    accept=".csv,text/csv"
-                    onChange={handleImportFileSelect}
-                  />
-                </div>
-              </div>
-
-              {importPreviewUrl && selectedImportFile?.type.startsWith("image/") ? (
-                <img
-                  src={importPreviewUrl}
-                  alt="Selected rows import preview"
-                  className="max-h-80 w-full object-contain"
-                />
-              ) : null}
-
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <Button
-                  type="button"
-                  className="w-full sm:w-auto"
-                  disabled={
-                    !selectedImportFile ||
-                    importRowsMutation.isPending ||
-                    importCsvMutation.isPending
-                  }
-                  onClick={handleImportRows}
-                >
-                  {importRowsMutation.isPending || importCsvMutation.isPending
-                    ? "Importing..."
-                    : "Import Rows"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full sm:w-auto"
-                  disabled={!selectedImportFile && !importPreviewUrl}
-                  onClick={handleClearImportSelection}
-                >
-                  Clear
-                </Button>
-              </div>
+            <div className="flex flex-col gap-2">
+              <label htmlFor="table-search" className="text-sm font-medium">
+                Search
+              </label>
+              <Input
+                id="table-search"
+                value={searchTerm}
+                onChange={handleSearchChange}
+                placeholder="Search across the whole table"
+              />
             </div>
-          ) : null}
 
-          <div className="flex flex-col gap-2">
-            <label htmlFor="table-search" className="text-sm font-medium">
-              Search
-            </label>
-            <Input
-              id="table-search"
-              value={searchTerm}
-              onChange={handleSearchChange}
-              placeholder="Search across the whole table"
-            />
-          </div>
-
-          {tableQuery.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading table...</p>
-          ) : tableQuery.isError ? (
-            <p className="text-sm text-destructive">
-              {tableQuery.error instanceof Error
-                ? tableQuery.error.message
-                : "Failed to load table."}
-            </p>
-          ) : (
-            <>
-              <Table>
-                <TableHeader>
-                  {table.getHeaderGroups().map((headerGroup) => (
-                    <TableRow key={headerGroup.id}>
-                      {headerGroup.headers.map((header) => (
-                        <TableHead key={header.id}>
-                          {header.isPlaceholder
-                            ? null
-                            : flexRender(header.column.columnDef.header, header.getContext())}
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableHeader>
-                <TableBody>
-                  {table.getRowModel().rows.length > 0 ? (
-                    table.getRowModel().rows.map((row) => (
-                      <TableRow key={row.id}>
-                        {row.getVisibleCells().map((cell) => (
-                          <TableCell key={cell.id}>
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </TableCell>
+            {tableQuery.isLoading ? (
+              <p className="text-sm text-muted-foreground">Loading table...</p>
+            ) : tableQuery.isError ? (
+              <p className="text-sm text-destructive">
+                {tableQuery.error instanceof Error
+                  ? tableQuery.error.message
+                  : "Failed to load table."}
+              </p>
+            ) : (
+              <>
+                <Table>
+                  <TableHeader>
+                    {table.getHeaderGroups().map((headerGroup) => (
+                      <TableRow key={headerGroup.id}>
+                        {headerGroup.headers.map((header) => (
+                          <TableHead key={header.id}>
+                            {header.isPlaceholder
+                              ? null
+                              : flexRender(header.column.columnDef.header, header.getContext())}
+                          </TableHead>
                         ))}
                       </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={columnDefs.length} className="text-center">
-                        No rows found.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {canEdit ? (
-                    <TableRow>
-                      {tableColumns.map((column) => (
-                        <TableCell key={`new-row-${column.columnName}`}>
-                          {column.columnName === "id" ? (
-                            <span className="text-muted-foreground">Auto</span>
-                          ) : (
-                            <Input
-                              value={newRowValues[column.columnName] ?? ""}
-                              onChange={(event) =>
-                                handleNewRowValueChange(column.columnName, event.target.value)
-                              }
-                              placeholder={column.columnName}
-                            />
-                          )}
+                    ))}
+                  </TableHeader>
+                  <TableBody>
+                    {table.getRowModel().rows.length > 0 ? (
+                      table.getRowModel().rows.map((row) => (
+                        <TableRow key={row.id}>
+                          {row.getVisibleCells().map((cell) => (
+                            <TableCell key={cell.id}>
+                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={columnDefs.length} className="text-center">
+                          No rows found.
                         </TableCell>
-                      ))}
-                      <TableCell>
-                        <Button
-                          size="sm"
-                          className="w-20"
-                          disabled={!canAddRow || addRowMutation.isPending}
-                          onClick={handleAddRow}
-                        >
-                          {addRowMutation.isPending ? "Adding..." : "Add"}
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ) : null}
-                </TableBody>
-              </Table>
+                      </TableRow>
+                    )}
+                    {canEdit ? (
+                      <TableRow>
+                        {tableColumns.map((column) => (
+                          <TableCell key={`new-row-${column.columnName}`}>
+                            {column.columnName === "id" ? (
+                              <span className="text-muted-foreground">Auto</span>
+                            ) : (
+                              <Input
+                                value={newRowValues[column.columnName] ?? ""}
+                                onChange={(event) =>
+                                  handleNewRowValueChange(column.columnName, event.target.value)
+                                }
+                                placeholder={column.columnName}
+                              />
+                            )}
+                          </TableCell>
+                        ))}
+                        <TableCell>
+                          <Button
+                            size="sm"
+                            className="w-20"
+                            disabled={!canAddRow || addRowMutation.isPending}
+                            onClick={handleAddRow}
+                          >
+                            {addRowMutation.isPending ? "Adding..." : "Add"}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </TableBody>
+                </Table>
 
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="grid gap-3 lg:flex lg:items-center lg:gap-3">
-                  <div className="w-full lg:w-[140px]">
-                    <Select
-                      value={exportFormat}
-                      onValueChange={(value) => {
-                        if (isExportFileFormat(value)) {
-                          setExportFormat(value);
-                        }
-                      }}
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="grid gap-3 lg:flex lg:items-center lg:gap-3">
+                    <div className="w-full lg:w-[140px]">
+                      <Select
+                        value={exportFormat}
+                        onValueChange={(value) => {
+                          if (isExportFileFormat(value)) {
+                            setExportFormat(value);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {EXPORT_FILE_FORMATS.map((format) => (
+                            <SelectItem key={format} value={format}>
+                              {format.toUpperCase()}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full sm:w-auto"
+                      disabled={rows.length === 0 || tableQuery.isLoading}
+                      onClick={handleExportCurrentPage}
                     >
-                      <SelectTrigger className="w-full">
+                      Export Current Page
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full sm:w-auto"
+                      disabled={tableQuery.isLoading || isExportingAll}
+                      onClick={() => void handleExportAll()}
+                    >
+                      {isExportingAll ? "Exporting..." : "Export Full Table"}
+                    </Button>
+                  </div>
+
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between lg:justify-end">
+                    <div className="text-sm text-muted-foreground sm:mr-1">
+                      {`${totalRows} total row(s)`}
+                    </div>
+                    <Select
+                      value={String(pagination.pageSize)}
+                      onValueChange={(value) =>
+                        setPagination({
+                          pageIndex: 0,
+                          pageSize: Number(value),
+                        })
+                      }
+                    >
+                      <SelectTrigger className="w-full sm:w-[120px]">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {EXPORT_FILE_FORMATS.map((format) => (
-                          <SelectItem key={format} value={format}>
-                            {format.toUpperCase()}
+                        {[10, 20, 50].map((pageSize) => (
+                          <SelectItem key={pageSize} value={String(pageSize)}>
+                            {pageSize} / page
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+
+                    <div className="text-sm text-muted-foreground">
+                      Page {pagination.pageIndex + 1} of {Math.max(table.getPageCount(), 1)}
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      className="w-full sm:w-auto"
+                      disabled={!table.getCanPreviousPage() || tableQuery.isFetching}
+                      onClick={() => table.previousPage()}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="w-full sm:w-auto"
+                      disabled={!table.getCanNextPage() || tableQuery.isFetching}
+                      onClick={() => table.nextPage()}
+                    >
+                      Next
+                    </Button>
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full sm:w-auto"
-                    disabled={rows.length === 0 || tableQuery.isLoading}
-                    onClick={handleExportCurrentPage}
-                  >
-                    Export Current Page
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full sm:w-auto"
-                    disabled={tableQuery.isLoading || isExportingAll}
-                    onClick={() => void handleExportAll()}
-                  >
-                    {isExportingAll ? "Exporting..." : "Export Full Table"}
-                  </Button>
                 </div>
-
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between lg:justify-end">
-                  <div className="text-sm text-muted-foreground sm:mr-1">
-                    {`${totalRows} total row(s)`}
-                  </div>
-                  <Select
-                    value={String(pagination.pageSize)}
-                    onValueChange={(value) =>
-                      setPagination({
-                        pageIndex: 0,
-                        pageSize: Number(value),
-                      })
-                    }
-                  >
-                    <SelectTrigger className="w-full sm:w-[120px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[10, 20, 50].map((pageSize) => (
-                        <SelectItem key={pageSize} value={String(pageSize)}>
-                          {pageSize} / page
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <div className="text-sm text-muted-foreground">
-                    Page {pagination.pageIndex + 1} of {Math.max(table.getPageCount(), 1)}
-                  </div>
-
-                  <Button
-                    variant="outline"
-                    className="w-full sm:w-auto"
-                    disabled={!table.getCanPreviousPage() || tableQuery.isFetching}
-                    onClick={() => table.previousPage()}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="w-full sm:w-auto"
-                    disabled={!table.getCanNextPage() || tableQuery.isFetching}
-                    onClick={() => table.nextPage()}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
-    </main>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
+    </motion.main>
   );
 }

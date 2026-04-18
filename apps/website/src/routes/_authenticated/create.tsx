@@ -1,6 +1,7 @@
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import { Link, createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router";
+import { motion, useReducedMotion } from "motion/react";
 import { z } from "zod";
 
 import { buttonVariants, Button } from "@/components/ui/button";
@@ -8,7 +9,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { env } from "@/lib/env";
-import { fetchApiJson, isRecord, showErrorToast, showSuccessToast } from "@/lib/utils";
+import {
+  fetchApiJson,
+  getEnterAnimationProps,
+  isRecord,
+  showErrorToast,
+  showSuccessToast,
+} from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/create")({
   component: RouteComponent,
@@ -135,6 +142,7 @@ async function postCreateRequest(url: string, payload: Record<string, unknown>) 
 
 function RouteComponent() {
   const { accessContext } = authenticatedRoute.useRouteContext();
+  const isReducedMotion = useReducedMotion() === true;
 
   if (accessContext.role === "system_admin") {
     return <CreateDepartmentAdminForm />;
@@ -145,8 +153,14 @@ function RouteComponent() {
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
-      <div className="flex items-center justify-between gap-4">
+    <motion.main
+      className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6"
+      {...getEnterAnimationProps(isReducedMotion)}
+    >
+      <motion.div
+        className="flex items-center justify-between gap-4"
+        {...getEnterAnimationProps(isReducedMotion, 0.04)}
+      >
         <div className="flex flex-col gap-1">
           <h1 className="text-xl font-semibold">Create Access</h1>
           <p className="text-sm text-muted-foreground">
@@ -156,13 +170,14 @@ function RouteComponent() {
         <Link to="/" className={buttonVariants({ variant: "default" })}>
           Back
         </Link>
-      </div>
-    </main>
+      </motion.div>
+    </motion.main>
   );
 }
 
 function CreateDepartmentAdminForm() {
   const navigate = useNavigate();
+  const isReducedMotion = useReducedMotion() === true;
   const mutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       postCreateRequest(`${env.VITE_SERVER_URL}/api/access/department-admins`, payload),
@@ -199,8 +214,14 @@ function CreateDepartmentAdminForm() {
   });
 
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
-      <div className="flex items-center justify-between gap-4">
+    <motion.main
+      className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6"
+      {...getEnterAnimationProps(isReducedMotion)}
+    >
+      <motion.div
+        className="flex items-center justify-between gap-4"
+        {...getEnterAnimationProps(isReducedMotion, 0.04)}
+      >
         <div className="flex flex-col gap-1">
           <h1 className="text-xl font-semibold">Create Department Admin</h1>
           <p className="text-sm text-muted-foreground">
@@ -210,171 +231,174 @@ function CreateDepartmentAdminForm() {
         <Link to="/" className={buttonVariants({ variant: "default" })}>
           Back
         </Link>
-      </div>
+      </motion.div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Department Admin Details</CardTitle>
-          <CardDescription>
-            Fill in the department details and the admin login details.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              void form.handleSubmit();
-            }}
-          >
-            <FieldGroup className="gap-6">
-              <div className="grid gap-6 lg:grid-cols-2">
-                <form.Field name="departmentName">
-                  {(field) => {
-                    const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+      <motion.div {...getEnterAnimationProps(isReducedMotion, 0.08, 16)}>
+        <Card>
+          <CardHeader>
+            <CardTitle>Department Admin Details</CardTitle>
+            <CardDescription>
+              Fill in the department details and the admin login details.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void form.handleSubmit();
+              }}
+            >
+              <FieldGroup className="gap-6">
+                <div className="grid gap-6 lg:grid-cols-2">
+                  <form.Field name="departmentName">
+                    {(field) => {
+                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
 
-                    return (
-                      <Field data-invalid={isInvalid}>
-                        <FieldLabel htmlFor={field.name}>Department Name</FieldLabel>
-                        <Input
-                          id={field.name}
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(event) => field.handleChange(event.target.value)}
-                          aria-invalid={isInvalid}
-                        />
-                        {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
-                      </Field>
-                    );
-                  }}
-                </form.Field>
-
-                <form.Field name="departmentSlug">
-                  {(field) => {
-                    const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-
-                    return (
-                      <Field data-invalid={isInvalid}>
-                        <FieldLabel htmlFor={field.name}>Department Slug</FieldLabel>
-                        <Input
-                          id={field.name}
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(event) => field.handleChange(event.target.value)}
-                          aria-invalid={isInvalid}
-                        />
-                        {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
-                      </Field>
-                    );
-                  }}
-                </form.Field>
-
-                <form.Field name="email">
-                  {(field) => {
-                    const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-
-                    return (
-                      <Field data-invalid={isInvalid}>
-                        <FieldLabel htmlFor={field.name}>Email</FieldLabel>
-                        <Input
-                          id={field.name}
-                          type="email"
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(event) => field.handleChange(event.target.value)}
-                          aria-invalid={isInvalid}
-                        />
-                        {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
-                      </Field>
-                    );
-                  }}
-                </form.Field>
-
-                <form.Field name="username">
-                  {(field) => {
-                    const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-
-                    return (
-                      <Field data-invalid={isInvalid}>
-                        <FieldLabel htmlFor={field.name}>Username</FieldLabel>
-                        <Input
-                          id={field.name}
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(event) => field.handleChange(event.target.value)}
-                          aria-invalid={isInvalid}
-                        />
-                        {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
-                      </Field>
-                    );
-                  }}
-                </form.Field>
-
-                <form.Field name="password">
-                  {(field) => {
-                    const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-
-                    return (
-                      <Field data-invalid={isInvalid}>
-                        <FieldLabel htmlFor={field.name}>Password</FieldLabel>
-                        <Input
-                          id={field.name}
-                          type="password"
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(event) => field.handleChange(event.target.value)}
-                          aria-invalid={isInvalid}
-                        />
-                        {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
-                      </Field>
-                    );
-                  }}
-                </form.Field>
-
-                <form.Field name="confirmPassword">
-                  {(field) => {
-                    const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-
-                    return (
-                      <Field data-invalid={isInvalid}>
-                        <FieldLabel htmlFor={field.name}>Confirm Password</FieldLabel>
-                        <Input
-                          id={field.name}
-                          type="password"
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(event) => field.handleChange(event.target.value)}
-                          aria-invalid={isInvalid}
-                        />
-                        {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
-                      </Field>
-                    );
-                  }}
-                </form.Field>
-              </div>
-
-              <form.Subscribe selector={(state) => [state.canSubmit, state.isSubmitting]}>
-                {([canSubmit, isSubmitting]) => (
-                  <CreateFormActions
-                    canSubmit={canSubmit}
-                    isPending={isSubmitting || mutation.isPending}
-                    submitLabel="Create Department Admin"
-                    onClear={() => {
-                      form.reset();
+                      return (
+                        <Field data-invalid={isInvalid}>
+                          <FieldLabel htmlFor={field.name}>Department Name</FieldLabel>
+                          <Input
+                            id={field.name}
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(event) => field.handleChange(event.target.value)}
+                            aria-invalid={isInvalid}
+                          />
+                          {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
+                        </Field>
+                      );
                     }}
-                  />
-                )}
-              </form.Subscribe>
-            </FieldGroup>
-          </form>
-        </CardContent>
-      </Card>
-    </main>
+                  </form.Field>
+
+                  <form.Field name="departmentSlug">
+                    {(field) => {
+                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+
+                      return (
+                        <Field data-invalid={isInvalid}>
+                          <FieldLabel htmlFor={field.name}>Department Slug</FieldLabel>
+                          <Input
+                            id={field.name}
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(event) => field.handleChange(event.target.value)}
+                            aria-invalid={isInvalid}
+                          />
+                          {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
+                        </Field>
+                      );
+                    }}
+                  </form.Field>
+
+                  <form.Field name="email">
+                    {(field) => {
+                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+
+                      return (
+                        <Field data-invalid={isInvalid}>
+                          <FieldLabel htmlFor={field.name}>Email</FieldLabel>
+                          <Input
+                            id={field.name}
+                            type="email"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(event) => field.handleChange(event.target.value)}
+                            aria-invalid={isInvalid}
+                          />
+                          {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
+                        </Field>
+                      );
+                    }}
+                  </form.Field>
+
+                  <form.Field name="username">
+                    {(field) => {
+                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+
+                      return (
+                        <Field data-invalid={isInvalid}>
+                          <FieldLabel htmlFor={field.name}>Username</FieldLabel>
+                          <Input
+                            id={field.name}
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(event) => field.handleChange(event.target.value)}
+                            aria-invalid={isInvalid}
+                          />
+                          {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
+                        </Field>
+                      );
+                    }}
+                  </form.Field>
+
+                  <form.Field name="password">
+                    {(field) => {
+                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+
+                      return (
+                        <Field data-invalid={isInvalid}>
+                          <FieldLabel htmlFor={field.name}>Password</FieldLabel>
+                          <Input
+                            id={field.name}
+                            type="password"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(event) => field.handleChange(event.target.value)}
+                            aria-invalid={isInvalid}
+                          />
+                          {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
+                        </Field>
+                      );
+                    }}
+                  </form.Field>
+
+                  <form.Field name="confirmPassword">
+                    {(field) => {
+                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+
+                      return (
+                        <Field data-invalid={isInvalid}>
+                          <FieldLabel htmlFor={field.name}>Confirm Password</FieldLabel>
+                          <Input
+                            id={field.name}
+                            type="password"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(event) => field.handleChange(event.target.value)}
+                            aria-invalid={isInvalid}
+                          />
+                          {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
+                        </Field>
+                      );
+                    }}
+                  </form.Field>
+                </div>
+
+                <form.Subscribe selector={(state) => [state.canSubmit, state.isSubmitting]}>
+                  {([canSubmit, isSubmitting]) => (
+                    <CreateFormActions
+                      canSubmit={canSubmit}
+                      isPending={isSubmitting || mutation.isPending}
+                      submitLabel="Create Department Admin"
+                      onClear={() => {
+                        form.reset();
+                      }}
+                    />
+                  )}
+                </form.Subscribe>
+              </FieldGroup>
+            </form>
+          </CardContent>
+        </Card>
+      </motion.div>
+    </motion.main>
   );
 }
 
 function CreateStaffForm({ departmentName }: { departmentName: string }) {
   const navigate = useNavigate();
+  const isReducedMotion = useReducedMotion() === true;
   const mutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       postCreateRequest(`${env.VITE_SERVER_URL}/api/access/staff`, payload),
@@ -407,8 +431,14 @@ function CreateStaffForm({ departmentName }: { departmentName: string }) {
   });
 
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
-      <div className="flex items-center justify-between gap-4">
+    <motion.main
+      className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6"
+      {...getEnterAnimationProps(isReducedMotion)}
+    >
+      <motion.div
+        className="flex items-center justify-between gap-4"
+        {...getEnterAnimationProps(isReducedMotion, 0.04)}
+      >
         <div className="flex flex-col gap-1">
           <h1 className="text-xl font-semibold">Create Staff</h1>
           <p className="text-sm text-muted-foreground">
@@ -418,123 +448,125 @@ function CreateStaffForm({ departmentName }: { departmentName: string }) {
         <Link to="/" className={buttonVariants({ variant: "default" })}>
           Back
         </Link>
-      </div>
+      </motion.div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Staff Details</CardTitle>
-          <CardDescription>Staff accounts have view-only access.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              void form.handleSubmit();
-            }}
-          >
-            <FieldGroup className="gap-6">
-              <div className="grid gap-6 lg:grid-cols-2">
-                <form.Field name="email">
-                  {(field) => {
-                    const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+      <motion.div {...getEnterAnimationProps(isReducedMotion, 0.08, 16)}>
+        <Card>
+          <CardHeader>
+            <CardTitle>Staff Details</CardTitle>
+            <CardDescription>Staff accounts have view-only access.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void form.handleSubmit();
+              }}
+            >
+              <FieldGroup className="gap-6">
+                <div className="grid gap-6 lg:grid-cols-2">
+                  <form.Field name="email">
+                    {(field) => {
+                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
 
-                    return (
-                      <Field data-invalid={isInvalid}>
-                        <FieldLabel htmlFor={field.name}>Email</FieldLabel>
-                        <Input
-                          id={field.name}
-                          type="email"
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(event) => field.handleChange(event.target.value)}
-                          aria-invalid={isInvalid}
-                        />
-                        {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
-                      </Field>
-                    );
-                  }}
-                </form.Field>
-
-                <form.Field name="username">
-                  {(field) => {
-                    const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-
-                    return (
-                      <Field data-invalid={isInvalid}>
-                        <FieldLabel htmlFor={field.name}>Username</FieldLabel>
-                        <Input
-                          id={field.name}
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(event) => field.handleChange(event.target.value)}
-                          aria-invalid={isInvalid}
-                        />
-                        {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
-                      </Field>
-                    );
-                  }}
-                </form.Field>
-
-                <form.Field name="password">
-                  {(field) => {
-                    const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-
-                    return (
-                      <Field data-invalid={isInvalid}>
-                        <FieldLabel htmlFor={field.name}>Password</FieldLabel>
-                        <Input
-                          id={field.name}
-                          type="password"
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(event) => field.handleChange(event.target.value)}
-                          aria-invalid={isInvalid}
-                        />
-                        {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
-                      </Field>
-                    );
-                  }}
-                </form.Field>
-
-                <form.Field name="confirmPassword">
-                  {(field) => {
-                    const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-
-                    return (
-                      <Field data-invalid={isInvalid}>
-                        <FieldLabel htmlFor={field.name}>Confirm Password</FieldLabel>
-                        <Input
-                          id={field.name}
-                          type="password"
-                          value={field.state.value}
-                          onBlur={field.handleBlur}
-                          onChange={(event) => field.handleChange(event.target.value)}
-                          aria-invalid={isInvalid}
-                        />
-                        {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
-                      </Field>
-                    );
-                  }}
-                </form.Field>
-              </div>
-
-              <form.Subscribe selector={(state) => [state.canSubmit, state.isSubmitting]}>
-                {([canSubmit, isSubmitting]) => (
-                  <CreateFormActions
-                    canSubmit={canSubmit}
-                    isPending={isSubmitting || mutation.isPending}
-                    submitLabel="Create Staff"
-                    onClear={() => {
-                      form.reset();
+                      return (
+                        <Field data-invalid={isInvalid}>
+                          <FieldLabel htmlFor={field.name}>Email</FieldLabel>
+                          <Input
+                            id={field.name}
+                            type="email"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(event) => field.handleChange(event.target.value)}
+                            aria-invalid={isInvalid}
+                          />
+                          {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
+                        </Field>
+                      );
                     }}
-                  />
-                )}
-              </form.Subscribe>
-            </FieldGroup>
-          </form>
-        </CardContent>
-      </Card>
-    </main>
+                  </form.Field>
+
+                  <form.Field name="username">
+                    {(field) => {
+                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+
+                      return (
+                        <Field data-invalid={isInvalid}>
+                          <FieldLabel htmlFor={field.name}>Username</FieldLabel>
+                          <Input
+                            id={field.name}
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(event) => field.handleChange(event.target.value)}
+                            aria-invalid={isInvalid}
+                          />
+                          {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
+                        </Field>
+                      );
+                    }}
+                  </form.Field>
+
+                  <form.Field name="password">
+                    {(field) => {
+                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+
+                      return (
+                        <Field data-invalid={isInvalid}>
+                          <FieldLabel htmlFor={field.name}>Password</FieldLabel>
+                          <Input
+                            id={field.name}
+                            type="password"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(event) => field.handleChange(event.target.value)}
+                            aria-invalid={isInvalid}
+                          />
+                          {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
+                        </Field>
+                      );
+                    }}
+                  </form.Field>
+
+                  <form.Field name="confirmPassword">
+                    {(field) => {
+                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+
+                      return (
+                        <Field data-invalid={isInvalid}>
+                          <FieldLabel htmlFor={field.name}>Confirm Password</FieldLabel>
+                          <Input
+                            id={field.name}
+                            type="password"
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(event) => field.handleChange(event.target.value)}
+                            aria-invalid={isInvalid}
+                          />
+                          {isInvalid ? <FieldError errors={field.state.meta.errors} /> : null}
+                        </Field>
+                      );
+                    }}
+                  </form.Field>
+                </div>
+
+                <form.Subscribe selector={(state) => [state.canSubmit, state.isSubmitting]}>
+                  {([canSubmit, isSubmitting]) => (
+                    <CreateFormActions
+                      canSubmit={canSubmit}
+                      isPending={isSubmitting || mutation.isPending}
+                      submitLabel="Create Staff"
+                      onClear={() => {
+                        form.reset();
+                      }}
+                    />
+                  )}
+                </form.Subscribe>
+              </FieldGroup>
+            </form>
+          </CardContent>
+        </Card>
+      </motion.div>
+    </motion.main>
   );
 }

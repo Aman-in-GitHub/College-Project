@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import { ModeToggle } from "@/components/mode-toggle";
@@ -29,6 +30,9 @@ import { FALLBACK_COLUMN_TYPES } from "@/lib/constants";
 import { env } from "@/lib/env";
 import {
   fetchApiJson,
+  getEnterAnimationProps,
+  getExitAnimationProps,
+  getHoverLiftProps,
   isRecord,
   showErrorToast,
   showInfoToast,
@@ -453,6 +457,7 @@ async function createTableRequest(payload: {
 function RouteComponent() {
   const { accessContext } = authenticatedRoute.useRouteContext();
   const navigate = useNavigate();
+  const isReducedMotion = useReducedMotion() === true;
   const department = accessContext.department;
   const isSystemAdmin = accessContext.role === "system_admin";
   const isDepartmentAdmin = accessContext.role === "department_admin" && department !== null;
@@ -752,8 +757,14 @@ function RouteComponent() {
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 p-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <motion.main
+      className="mx-auto flex w-full max-w-7xl flex-col gap-8 p-6"
+      {...getEnterAnimationProps(isReducedMotion)}
+    >
+      <motion.div
+        className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
+        {...getEnterAnimationProps(isReducedMotion, 0.03)}
+      >
         <div className="flex flex-col gap-1">
           <h1 className="text-xl font-semibold">
             {isSystemAdmin
@@ -793,327 +804,359 @@ function RouteComponent() {
             <ModeToggle />
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {(isSystemAdmin || isDepartmentAdmin) && (
-        <Card>
-          <CardHeader>
-            <CardTitle>{isSystemAdmin ? "Created Department Admins" : "Created Staff"}</CardTitle>
-            <CardDescription>
-              {isSystemAdmin
-                ? "Department admins created from this account are listed here."
-                : "Staff accounts created from this department admin account are listed here."}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            {managedUsersQuery.isLoading ? (
-              <p className="text-sm text-muted-foreground">Loading...</p>
-            ) : managedUsersQuery.isError ? (
-              <p className="text-sm text-destructive">
-                {managedUsersQuery.error instanceof Error
-                  ? managedUsersQuery.error.message
-                  : "Failed to load users."}
-              </p>
-            ) : managedUsersQuery.data && managedUsersQuery.data.data.items.length > 0 ? (
-              managedUsersQuery.data.data.items.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex flex-col gap-1 border p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="flex flex-col gap-1">
-                    <p className="font-medium">{item.user.name}</p>
-                    <p className="text-muted-foreground">{item.user.email}</p>
-                    {isSystemAdmin ? (
-                      <p className="text-muted-foreground">
-                        {item.department.name} ({item.department.slug})
-                      </p>
-                    ) : null}
-                    {item.user.isBanned ? <p className="text-destructive">Banned</p> : null}
-                  </div>
-                  <div className="flex flex-col gap-3 sm:items-end">
-                    <div className="text-sm text-muted-foreground">
-                      {item.user.username ? `@${item.user.username}` : item.role}
+        <motion.div {...getEnterAnimationProps(isReducedMotion, 0.06, 14)}>
+          <Card>
+            <CardHeader>
+              <CardTitle>{isSystemAdmin ? "Created Department Admins" : "Created Staff"}</CardTitle>
+              <CardDescription>
+                {isSystemAdmin
+                  ? "Department admins created from this account are listed here."
+                  : "Staff accounts created from this department admin account are listed here."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              {managedUsersQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : managedUsersQuery.isError ? (
+                <p className="text-sm text-destructive">
+                  {managedUsersQuery.error instanceof Error
+                    ? managedUsersQuery.error.message
+                    : "Failed to load users."}
+                </p>
+              ) : managedUsersQuery.data && managedUsersQuery.data.data.items.length > 0 ? (
+                managedUsersQuery.data.data.items.map((item, index) => (
+                  <motion.div
+                    key={item.id}
+                    className="flex flex-col gap-1 border p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
+                    {...getEnterAnimationProps(isReducedMotion, index * 0.03, 8)}
+                  >
+                    <div className="flex flex-col gap-1">
+                      <p className="font-medium">{item.user.name}</p>
+                      <p className="text-muted-foreground">{item.user.email}</p>
+                      {isSystemAdmin ? (
+                        <p className="text-muted-foreground">
+                          {item.department.name} ({item.department.slug})
+                        </p>
+                      ) : null}
+                      {item.user.isBanned ? <p className="text-destructive">Banned</p> : null}
                     </div>
-                    <Button
-                      type="button"
-                      variant={item.user.isBanned ? "outline" : "destructive"}
-                      className="w-full sm:w-auto"
-                      disabled={banUserMutation.isPending || unbanUserMutation.isPending}
-                      onClick={() =>
-                        item.user.isBanned
-                          ? void unbanUserMutation.mutateAsync(item.user.id)
-                          : void banUserMutation.mutateAsync(item.user.id)
-                      }
-                    >
-                      {item.user.isBanned
-                        ? unbanUserMutation.isPending
-                          ? "Unbanning..."
-                          : "Unban"
-                        : banUserMutation.isPending
-                          ? "Banning..."
-                          : "Ban"}
-                    </Button>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                {isSystemAdmin ? "No department admins created yet." : "No staff created yet."}
-              </p>
-            )}
-          </CardContent>
-        </Card>
+                    <div className="flex flex-col gap-3 sm:items-end">
+                      <div className="text-sm text-muted-foreground">
+                        {item.user.username ? `@${item.user.username}` : item.role}
+                      </div>
+                      <Button
+                        type="button"
+                        variant={item.user.isBanned ? "outline" : "destructive"}
+                        className="w-full sm:w-auto"
+                        disabled={banUserMutation.isPending || unbanUserMutation.isPending}
+                        onClick={() =>
+                          item.user.isBanned
+                            ? void unbanUserMutation.mutateAsync(item.user.id)
+                            : void banUserMutation.mutateAsync(item.user.id)
+                        }
+                      >
+                        {item.user.isBanned
+                          ? unbanUserMutation.isPending
+                            ? "Unbanning..."
+                            : "Unban"
+                          : banUserMutation.isPending
+                            ? "Banning..."
+                            : "Ban"}
+                      </Button>
+                    </div>
+                  </motion.div>
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {isSystemAdmin ? "No department admins created yet." : "No staff created yet."}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
       )}
 
       {canLoadDepartmentTables ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Tables</CardTitle>
-            <CardDescription>Open digitized tables for {department.name}.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            {departmentTablesQuery.isLoading ? (
-              <p className="text-sm text-muted-foreground">Loading tables...</p>
-            ) : departmentTablesQuery.isError ? (
-              <p className="text-sm text-destructive">
-                {departmentTablesQuery.error instanceof Error
-                  ? departmentTablesQuery.error.message
-                  : "Failed to load tables."}
-              </p>
-            ) : departmentTablesQuery.data && departmentTablesQuery.data.data.tables.length > 0 ? (
-              departmentTablesQuery.data.data.tables.map((table) => (
-                <Link
-                  key={table.fullTableName}
-                  to="/$departmentSlug/$tableName"
-                  params={{
-                    departmentSlug: department.slug,
-                    tableName: table.tableName,
-                  }}
-                  className="border p-4 text-sm transition-colors hover:bg-muted"
-                >
-                  <div className="font-medium">{table.tableName}</div>
-                  <div className="text-muted-foreground">{table.fullTableName}</div>
-                </Link>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">No tables created yet.</p>
-            )}
-          </CardContent>
-        </Card>
+        <motion.div {...getEnterAnimationProps(isReducedMotion, 0.09, 14)}>
+          <Card>
+            <CardHeader>
+              <CardTitle>Tables</CardTitle>
+              <CardDescription>Open digitized tables for {department.name}.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              {departmentTablesQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading tables...</p>
+              ) : departmentTablesQuery.isError ? (
+                <p className="text-sm text-destructive">
+                  {departmentTablesQuery.error instanceof Error
+                    ? departmentTablesQuery.error.message
+                    : "Failed to load tables."}
+                </p>
+              ) : departmentTablesQuery.data &&
+                departmentTablesQuery.data.data.tables.length > 0 ? (
+                departmentTablesQuery.data.data.tables.map((table, index) => (
+                  <motion.div
+                    key={table.fullTableName}
+                    {...getEnterAnimationProps(isReducedMotion, index * 0.03, 8)}
+                    {...getHoverLiftProps(isReducedMotion)}
+                  >
+                    <Link
+                      to="/$departmentSlug/$tableName"
+                      params={{
+                        departmentSlug: department.slug,
+                        tableName: table.tableName,
+                      }}
+                      className="block border p-4 text-sm transition-colors hover:bg-muted"
+                    >
+                      <div className="font-medium">{table.tableName}</div>
+                      <div className="text-muted-foreground">{table.fullTableName}</div>
+                    </Link>
+                  </motion.div>
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground">No tables created yet.</p>
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
       ) : null}
 
       {isDepartmentAdmin ? (
         <>
-          <Card>
-            <CardHeader>
-              <CardTitle>Photo Input</CardTitle>
-              <CardDescription>Choose one method: camera or upload.</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="camera-photo">Take Photo</Label>
-                  <Input
-                    id="camera-photo"
-                    ref={cameraInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={onSelectFile}
-                  />
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="upload-photo">Upload Photo</Label>
-                  <Input
-                    id="upload-photo"
-                    ref={uploadInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={onSelectFile}
-                  />
-                </div>
-              </div>
-
-              {previewUrl ? (
-                <div ref={previewSectionRef} className="flex flex-col gap-3">
-                  <img
-                    src={previewUrl}
-                    alt="Selected table preview"
-                    className="max-h-96 w-full object-contain"
-                  />
-                </div>
-              ) : null}
-
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <Button
-                  type="button"
-                  className="w-full sm:w-auto"
-                  disabled={
-                    !selectedFile || scanMutation.isPending || createTableMutation.isPending
-                  }
-                  onClick={scanTable}
-                >
-                  {scanMutation.isPending ? "Scanning..." : "Scan Table"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full sm:w-auto"
-                  disabled={!selectedFile && scanResult.length === 0 && !previewUrl}
-                  onClick={clearSelection}
-                >
-                  Clear
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {scanResult.length > 0 ? (
-            <Card ref={schemaEditorRef}>
+          <motion.div {...getEnterAnimationProps(isReducedMotion, 0.12, 14)}>
+            <Card>
               <CardHeader>
-                <CardTitle>Schema Editor</CardTitle>
-                <CardDescription>
-                  Edit column names and types before creating the DB table.
-                </CardDescription>
+                <CardTitle>Photo Input</CardTitle>
+                <CardDescription>Choose one method: camera or upload.</CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-col gap-5">
-                <div className="flex flex-col gap-2">
-                  <Label>Detected Table</Label>
-                  <Select
-                    value={String(activeTableIndex)}
-                    onValueChange={(value) => setSelectedTableIndex(Number(value))}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select table">{selectedTableLabel}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {scanResult.map((_, index) => (
-                        <SelectItem key={`table-${index}`} value={String(index)}>
-                          Table {index + 1}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="table-name">Table Name</Label>
-                  <Input
-                    id="table-name"
-                    placeholder="example: scanned_table"
-                    value={tableName}
-                    onChange={(event) => setTableName(event.target.value)}
-                  />
-                </div>
-
-                <div className="overflow-x-auto border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-24">Required</TableHead>
-                        <TableHead className="min-w-48">Column Name</TableHead>
-                        <TableHead className="w-56">Data Type</TableHead>
-                        <TableHead className="min-w-56">Sample Values</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {currentColumns.map((column, index) => (
-                        <TableRow key={`column-${index}`}>
-                          <TableCell>
-                            <Checkbox
-                              id={`column-required-${index}`}
-                              checked={column.isRequired}
-                              onCheckedChange={(checked) =>
-                                updateColumnRequired(index, checked === true)
-                              }
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              id={`column-name-${index}`}
-                              value={column.name}
-                              onChange={(event) => updateColumnName(index, event.target.value)}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Select
-                              value={column.type}
-                              onValueChange={(value) => updateColumnType(index, value)}
-                            >
-                              <SelectTrigger className="w-full">
-                                <SelectValue>{column.type}</SelectValue>
-                              </SelectTrigger>
-                              <SelectContent>
-                                {availableTypes.map((type) => (
-                                  <SelectItem key={`${index}-${type}`} value={type}>
-                                    {type}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {formatSampleValues(currentSampleColumns[index]?.values ?? [])}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center gap-3">
-                    <Checkbox
-                      id="fill-data"
-                      checked={isFillDataEnabled}
-                      onCheckedChange={(checked) => setIsFillDataEnabled(checked === true)}
+              <CardContent className="flex flex-col gap-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="camera-photo">Take Photo</Label>
+                    <Input
+                      id="camera-photo"
+                      ref={cameraInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={onSelectFile}
                     />
-                    <Label htmlFor="fill-data" className="cursor-pointer">
-                      Fill data from photo into table
-                    </Label>
                   </div>
 
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="upload-photo">Upload Photo</Label>
+                    <Input
+                      id="upload-photo"
+                      ref={uploadInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={onSelectFile}
+                    />
+                  </div>
+                </div>
+
+                <AnimatePresence initial={false}>
+                  {previewUrl ? (
+                    <motion.div
+                      key="photo-preview"
+                      ref={previewSectionRef}
+                      className="flex flex-col gap-3"
+                      {...getExitAnimationProps(isReducedMotion, 10)}
+                    >
+                      <img
+                        src={previewUrl}
+                        alt="Selected table preview"
+                        className="max-h-96 w-full object-contain"
+                      />
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+
+                <div className="flex flex-col gap-3 sm:flex-row">
                   <Button
                     type="button"
+                    className="w-full sm:w-auto"
                     disabled={
-                      scanMutation.isPending ||
-                      createTableMutation.isPending ||
-                      currentColumns.length === 0
+                      !selectedFile || scanMutation.isPending || createTableMutation.isPending
                     }
-                    onClick={createTable}
+                    onClick={scanTable}
                   >
-                    {createTableMutation.isPending ? "Creating..." : "Create Table"}
+                    {scanMutation.isPending ? "Scanning..." : "Scan Table"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    disabled={!selectedFile && scanResult.length === 0 && !previewUrl}
+                    onClick={clearSelection}
+                  >
+                    Clear
                   </Button>
                 </div>
               </CardContent>
             </Card>
-          ) : null}
+          </motion.div>
+
+          <AnimatePresence initial={false}>
+            {scanResult.length > 0 ? (
+              <motion.div
+                key="schema-editor"
+                ref={schemaEditorRef}
+                {...getExitAnimationProps(isReducedMotion, 12)}
+              >
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Schema Editor</CardTitle>
+                    <CardDescription>
+                      Edit column names and types before creating the DB table.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-5">
+                    <div className="flex flex-col gap-2">
+                      <Label>Detected Table</Label>
+                      <Select
+                        value={String(activeTableIndex)}
+                        onValueChange={(value) => setSelectedTableIndex(Number(value))}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select table">{selectedTableLabel}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {scanResult.map((_, index) => (
+                            <SelectItem key={`table-${index}`} value={String(index)}>
+                              Table {index + 1}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="table-name">Table Name</Label>
+                      <Input
+                        id="table-name"
+                        placeholder="example: scanned_table"
+                        value={tableName}
+                        onChange={(event) => setTableName(event.target.value)}
+                      />
+                    </div>
+
+                    <div className="overflow-x-auto border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-24">Required</TableHead>
+                            <TableHead className="min-w-48">Column Name</TableHead>
+                            <TableHead className="w-56">Data Type</TableHead>
+                            <TableHead className="min-w-56">Sample Values</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {currentColumns.map((column, index) => (
+                            <TableRow key={`column-${index}`}>
+                              <TableCell>
+                                <Checkbox
+                                  id={`column-required-${index}`}
+                                  checked={column.isRequired}
+                                  onCheckedChange={(checked) =>
+                                    updateColumnRequired(index, checked === true)
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Input
+                                  id={`column-name-${index}`}
+                                  value={column.name}
+                                  onChange={(event) => updateColumnName(index, event.target.value)}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Select
+                                  value={column.type}
+                                  onValueChange={(value) => updateColumnType(index, value)}
+                                >
+                                  <SelectTrigger className="w-full">
+                                    <SelectValue>{column.type}</SelectValue>
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {availableTypes.map((type) => (
+                                      <SelectItem key={`${index}-${type}`} value={type}>
+                                        {type}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {formatSampleValues(currentSampleColumns[index]?.values ?? [])}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-center gap-3">
+                        <Checkbox
+                          id="fill-data"
+                          checked={isFillDataEnabled}
+                          onCheckedChange={(checked) => setIsFillDataEnabled(checked === true)}
+                        />
+                        <Label htmlFor="fill-data" className="cursor-pointer">
+                          Fill data from photo into table
+                        </Label>
+                      </div>
+
+                      <Button
+                        type="button"
+                        disabled={
+                          scanMutation.isPending ||
+                          createTableMutation.isPending ||
+                          currentColumns.length === 0
+                        }
+                        onClick={createTable}
+                      >
+                        {createTableMutation.isPending ? "Creating..." : "Create Table"}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
         </>
       ) : null}
 
       {accessContext.role === "department_staff" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>View Only</CardTitle>
-            <CardDescription>
-              Department staff can open tables and view department data but cannot create staff,
-              scan tables, or create tables.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+        <motion.div {...getEnterAnimationProps(isReducedMotion, 0.12, 12)}>
+          <Card>
+            <CardHeader>
+              <CardTitle>View Only</CardTitle>
+              <CardDescription>
+                Department staff can open tables and view department data but cannot create staff,
+                scan tables, or create tables.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </motion.div>
       ) : null}
 
       {accessContext.role === "unassigned" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>No Role Assigned</CardTitle>
-            <CardDescription>
-              This account is signed in but has not been assigned a system or department role yet.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+        <motion.div {...getEnterAnimationProps(isReducedMotion, 0.12, 12)}>
+          <Card>
+            <CardHeader>
+              <CardTitle>No Role Assigned</CardTitle>
+              <CardDescription>
+                This account is signed in but has not been assigned a system or department role yet.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </motion.div>
       ) : null}
-    </main>
+    </motion.main>
   );
 }

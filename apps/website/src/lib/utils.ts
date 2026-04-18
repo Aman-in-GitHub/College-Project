@@ -9,6 +9,56 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export function getEnterAnimationProps(isReducedMotion: boolean, delaySeconds = 0, distance = 12) {
+  return {
+    initial: {
+      opacity: 0,
+      y: isReducedMotion ? 0 : distance,
+    },
+    animate: {
+      opacity: 1,
+      y: 0,
+    },
+    transition: {
+      duration: isReducedMotion ? 0.18 : 0.28,
+      delay: delaySeconds,
+    },
+  };
+}
+
+export function getExitAnimationProps(isReducedMotion: boolean, distance = 8) {
+  return {
+    initial: {
+      opacity: 0,
+      y: isReducedMotion ? 0 : distance,
+    },
+    animate: {
+      opacity: 1,
+      y: 0,
+    },
+    exit: {
+      opacity: 0,
+      y: isReducedMotion ? 0 : -distance,
+    },
+    transition: {
+      duration: isReducedMotion ? 0.16 : 0.24,
+    },
+  };
+}
+
+export function getHoverLiftProps(isReducedMotion: boolean) {
+  return isReducedMotion
+    ? {}
+    : {
+        whileHover: {
+          y: -2,
+        },
+        transition: {
+          duration: 0.18,
+        },
+      };
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
