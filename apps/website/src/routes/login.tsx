@@ -71,7 +71,7 @@ function RouteComponent() {
 
   return (
     <main className="flex min-h-svh flex-col items-center justify-center">
-      <div className="flex w-full max-w-5xl flex-col gap-2">
+      <div className="flex w-full max-w-7xl flex-col gap-2">
         <Card className="overflow-hidden p-0">
           <CardContent className="grid p-0 md:grid-cols-2">
             <form
@@ -175,7 +175,7 @@ function RouteComponent() {
               <img
                 src="/login.svg"
                 alt="Login illustration"
-                className="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
+                className="absolute inset-0 h-full w-full object-contain dark:brightness-[0.2] dark:grayscale"
               />
             </div>
           </CardContent>

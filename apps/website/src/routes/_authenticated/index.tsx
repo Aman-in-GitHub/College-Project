@@ -1,9 +1,10 @@
-import { useMutation } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link, createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -15,11 +16,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { authClient } from "@/lib/auth";
 import { env } from "@/lib/env";
+import { fetchApiJson, isRecord } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/")({
   component: RouteComponent,
 });
+
+const authenticatedRoute = getRouteApi("/_authenticated");
 
 const FALLBACK_COLUMN_TYPES = [
   "text",
@@ -42,6 +47,7 @@ type ScannedColumn = {
 type EditableColumn = {
   name: string;
   type: DbColumnType;
+  isRequired: boolean;
 };
 
 type ScanTable = {
@@ -52,24 +58,78 @@ type ScanResponse = {
   success: boolean;
   message: string;
   data: {
+    department: {
+      id: string;
+      name: string;
+      slug: string;
+    } | null;
     tables: ScanTable[];
     columnTypes: DbColumnType[];
-  };
-};
-
-type ErrorResponse = {
-  message?: string;
-  data?: {
-    issues?: Array<{
-      path: string;
-      message: string;
-    }>;
   };
 };
 
 type CreateTableResponse = {
   success: boolean;
   message: string;
+  data: {
+    department: {
+      id: string;
+      name: string;
+      slug: string;
+    };
+    baseTableName: string;
+    tableName: string;
+    columns: Array<{
+      name: string;
+      type: DbColumnType;
+      isRequired: boolean;
+    }>;
+  };
+};
+
+type AccessRole = "system_admin" | "department_admin" | "department_staff" | "unassigned";
+
+type ManagedUserItem = {
+  id: string;
+  role: "department_admin" | "department_staff";
+  createdAt: string;
+  department: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    username: string | null;
+  };
+};
+
+type ManagedUsersResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    role: AccessRole;
+    items: ManagedUserItem[];
+  };
+};
+
+type DepartmentTablesResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    department: {
+      id: string;
+      name: string;
+      slug: string;
+    };
+    tables: Array<{
+      tableName: string;
+      fullTableName: string;
+      href: string;
+    }>;
+  };
 };
 
 function toScanRows(columns: ScannedColumn[]): string[][] {
@@ -90,90 +150,236 @@ function formatSampleValues(values: string[]): string {
 }
 
 function isDbColumnType(value: string | null): value is DbColumnType {
-  return value !== null && FALLBACK_COLUMN_TYPES.includes(value as DbColumnType);
+  return value !== null && FALLBACK_COLUMN_TYPES.some((columnType) => columnType === value);
 }
 
 function isScanResponse(value: unknown): value is ScanResponse {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const candidate = value as Partial<ScanResponse>;
-
   return (
-    typeof candidate.success === "boolean" &&
-    typeof candidate.message === "string" &&
-    Boolean(candidate.data) &&
-    Array.isArray(candidate.data?.tables) &&
-    Array.isArray(candidate.data?.columnTypes)
+    isRecord(value) &&
+    typeof value.success === "boolean" &&
+    typeof value.message === "string" &&
+    isRecord(value.data) &&
+    Array.isArray(value.data.tables) &&
+    Array.isArray(value.data.columnTypes)
   );
 }
 
 function isCreateTableResponse(value: unknown): value is CreateTableResponse {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const candidate = value as Partial<CreateTableResponse>;
-
-  return typeof candidate.success === "boolean" && typeof candidate.message === "string";
+  return (
+    isRecord(value) &&
+    typeof value.success === "boolean" &&
+    typeof value.message === "string" &&
+    isRecord(value.data) &&
+    isRecord(value.data.department) &&
+    typeof value.data.department.slug === "string" &&
+    typeof value.data.baseTableName === "string"
+  );
 }
 
-async function scanTableRequest(file: File): Promise<ScanResponse> {
+function isAccessRole(value: unknown): value is AccessRole {
+  return (
+    value === "system_admin" ||
+    value === "department_admin" ||
+    value === "department_staff" ||
+    value === "unassigned"
+  );
+}
+
+function isManagedUserItem(value: unknown): value is ManagedUserItem {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    (value.role === "department_admin" || value.role === "department_staff") &&
+    typeof value.createdAt === "string" &&
+    isRecord(value.department) &&
+    typeof value.department.id === "string" &&
+    typeof value.department.name === "string" &&
+    typeof value.department.slug === "string" &&
+    isRecord(value.user) &&
+    typeof value.user.id === "string" &&
+    typeof value.user.name === "string" &&
+    typeof value.user.email === "string" &&
+    (typeof value.user.username === "string" || value.user.username === null)
+  );
+}
+
+function isManagedUsersResponse(value: unknown): value is ManagedUsersResponse {
+  return (
+    isRecord(value) &&
+    typeof value.success === "boolean" &&
+    typeof value.message === "string" &&
+    isRecord(value.data) &&
+    isAccessRole(value.data.role) &&
+    Array.isArray(value.data.items) &&
+    value.data.items.every((item) => isManagedUserItem(item))
+  );
+}
+
+function isDepartmentTablesResponse(value: unknown): value is DepartmentTablesResponse {
+  return (
+    isRecord(value) &&
+    typeof value.success === "boolean" &&
+    typeof value.message === "string" &&
+    isRecord(value.data) &&
+    isRecord(value.data.department) &&
+    typeof value.data.department.id === "string" &&
+    typeof value.data.department.name === "string" &&
+    typeof value.data.department.slug === "string" &&
+    Array.isArray(value.data.tables) &&
+    value.data.tables.every(
+      (table) =>
+        isRecord(table) &&
+        typeof table.tableName === "string" &&
+        typeof table.fullTableName === "string" &&
+        typeof table.href === "string",
+    )
+  );
+}
+
+async function fetchManagedUsers(): Promise<ManagedUsersResponse> {
+  const { response, body } = await fetchApiJson(`${env.VITE_SERVER_URL}/api/access/managed-users`);
+
+  if (!response.ok) {
+    if (isRecord(body) && typeof body.message === "string") {
+      throw new Error(body.message);
+    }
+
+    throw new Error("Failed to load managed users.");
+  }
+
+  if (!isManagedUsersResponse(body)) {
+    throw new Error("Managed users response is invalid.");
+  }
+
+  return body;
+}
+
+async function fetchDepartmentTables(departmentSlug: string): Promise<DepartmentTablesResponse> {
+  const { response, body } = await fetchApiJson(`${env.VITE_SERVER_URL}/api/tables`, {
+    headers: {
+      "x-department-slug": departmentSlug,
+    },
+  });
+
+  if (!response.ok) {
+    if (isRecord(body) && typeof body.message === "string") {
+      throw new Error(body.message);
+    }
+
+    if (isRecord(body) && typeof body.error === "string") {
+      throw new Error(body.error);
+    }
+
+    throw new Error("Failed to load department tables.");
+  }
+
+  if (!isDepartmentTablesResponse(body)) {
+    throw new Error("Department tables response is invalid.");
+  }
+
+  return body;
+}
+
+async function scanTableRequest({
+  departmentSlug,
+  file,
+}: {
+  departmentSlug: string;
+  file: File;
+}): Promise<ScanResponse> {
   const formData = new FormData();
   formData.append("file", file, file.name);
 
-  const response = await fetch(`${env.VITE_SERVER_URL}/api/table/scan`, {
+  const { response, body } = await fetchApiJson(`${env.VITE_SERVER_URL}/api/table/scan`, {
     method: "POST",
-    credentials: "include",
+    headers: {
+      "x-department-slug": departmentSlug,
+    },
     body: formData,
   });
 
-  const payload: unknown = await response.json();
-
   if (!response.ok) {
-    const errorPayload = payload as ErrorResponse;
-    throw new Error(errorPayload.message ?? "Scan failed");
+    if (isRecord(body) && typeof body.message === "string") {
+      throw new Error(body.message);
+    }
+
+    if (isRecord(body) && typeof body.error === "string") {
+      throw new Error(body.error);
+    }
+
+    throw new Error("Scan failed");
   }
 
-  if (!isScanResponse(payload)) {
+  if (!isScanResponse(body)) {
     throw new Error("Scan returned an invalid response");
   }
 
-  return payload;
+  return body;
 }
 
 async function createTableRequest(payload: {
+  departmentSlug: string;
   tableName: string;
   columns: EditableColumn[];
   fillData: boolean;
   rows: string[][];
 }): Promise<CreateTableResponse> {
-  const response = await fetch(`${env.VITE_SERVER_URL}/api/table/create`, {
+  const { response, body } = await fetchApiJson(`${env.VITE_SERVER_URL}/api/table/create`, {
     method: "POST",
-    credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      "x-department-slug": payload.departmentSlug,
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      tableName: payload.tableName,
+      columns: payload.columns,
+      fillData: payload.fillData,
+      rows: payload.rows,
+    }),
   });
 
-  const body: unknown = await response.json();
-
   if (!response.ok || !isCreateTableResponse(body) || !body.success) {
-    const errorBody = body as ErrorResponse;
-    const issueMessage =
-      errorBody.data?.issues && errorBody.data.issues.length > 0
-        ? errorBody.data.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")
-        : null;
+    let issueMessage: string | null = null;
 
-    throw new Error(issueMessage ?? errorBody.message ?? "Table creation failed");
+    if (isRecord(body) && isRecord(body.data) && Array.isArray(body.data.issues)) {
+      const issueParts = body.data.issues
+        .map((issue) => {
+          if (!isRecord(issue)) {
+            return null;
+          }
+
+          if (typeof issue.path !== "string" || typeof issue.message !== "string") {
+            return null;
+          }
+
+          return `${issue.path}: ${issue.message}`;
+        })
+        .filter((issue): issue is string => issue !== null);
+
+      issueMessage = issueParts.length > 0 ? issueParts.join("; ") : null;
+    }
+
+    const message =
+      isRecord(body) && typeof body.message === "string"
+        ? body.message
+        : isRecord(body) && typeof body.error === "string"
+          ? body.error
+          : "Table creation failed";
+
+    throw new Error(issueMessage ?? message);
   }
 
   return body;
 }
 
 function RouteComponent() {
+  const { accessContext } = authenticatedRoute.useRouteContext();
+  const navigate = useNavigate();
+  const department = accessContext.department;
+  const isSystemAdmin = accessContext.role === "system_admin";
+  const isDepartmentAdmin = accessContext.role === "department_admin" && department !== null;
+  const isDepartmentStaff = accessContext.role === "department_staff" && department !== null;
+  const canLoadDepartmentTables = isDepartmentAdmin || isDepartmentStaff;
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [editableSchemas, setEditableSchemas] = useState<EditableColumn[][]>([]);
@@ -183,6 +389,37 @@ function RouteComponent() {
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const schemaEditorRef = useRef<HTMLDivElement | null>(null);
+  const managedUsersQuery = useQuery({
+    queryKey: ["managed-users", accessContext.role, department?.id ?? null],
+    queryFn: fetchManagedUsers,
+    enabled: isSystemAdmin || isDepartmentAdmin,
+  });
+  const departmentTablesQuery = useQuery({
+    queryKey: ["department-tables", department?.slug ?? null],
+    queryFn: () => {
+      if (!department) {
+        throw new Error("Department context is required.");
+      }
+
+      return fetchDepartmentTables(department.slug);
+    },
+    enabled: canLoadDepartmentTables,
+  });
+  const signOutMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await authClient.signOut();
+
+      if (error) {
+        throw new Error(error.message);
+      }
+    },
+    onSuccess: () => {
+      navigate({ to: "/login" });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Logout failed");
+    },
+  });
 
   const scanMutation = useMutation({
     mutationFn: scanTableRequest,
@@ -192,6 +429,7 @@ function RouteComponent() {
           table.columns.map((column) => ({
             name: column.name,
             type: column.inferredType,
+            isRequired: false,
           })),
         ),
       );
@@ -212,6 +450,13 @@ function RouteComponent() {
     mutationFn: createTableRequest,
     onSuccess: (payload) => {
       toast.success(payload.message || "Table created successfully.");
+      navigate({
+        to: "/$departmentSlug/$tableName",
+        params: {
+          departmentSlug: payload.data.department.slug,
+          tableName: payload.data.baseTableName,
+        },
+      });
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Table creation failed");
@@ -304,7 +549,15 @@ function RouteComponent() {
       return;
     }
 
-    await scanMutation.mutateAsync(selectedFile);
+    if (!isDepartmentAdmin) {
+      toast.error("Only department admins can scan tables.");
+      return;
+    }
+
+    await scanMutation.mutateAsync({
+      departmentSlug: department.slug,
+      file: selectedFile,
+    });
   }
 
   function updateColumnName(columnIndex: number, nextName: string) {
@@ -337,6 +590,20 @@ function RouteComponent() {
     );
   }
 
+  function updateColumnRequired(columnIndex: number, isRequired: boolean) {
+    setEditableSchemas((previous) =>
+      previous.map((tableColumns, tableIndex) => {
+        if (tableIndex !== activeTableIndex) {
+          return tableColumns;
+        }
+
+        return tableColumns.map((column, index) =>
+          index === columnIndex ? { ...column, isRequired } : column,
+        );
+      }),
+    );
+  }
+
   async function createTable() {
     if (currentColumns.length === 0) {
       toast.error("No scanned columns to create a table from.");
@@ -348,7 +615,13 @@ function RouteComponent() {
       return;
     }
 
+    if (!isDepartmentAdmin) {
+      toast.error("Only department admins can create tables.");
+      return;
+    }
+
     await createTableMutation.mutateAsync({
+      departmentSlug: department.slug,
       tableName,
       columns: currentColumns,
       fillData: isFillDataEnabled,
@@ -357,165 +630,327 @@ function RouteComponent() {
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-8 p-6">
-      <h1 className="text-xl font-semibold">Scan Table From Image</h1>
+    <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 p-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-xl font-semibold">
+            {isSystemAdmin
+              ? "Department Admins"
+              : isDepartmentAdmin
+                ? "Department Dashboard"
+                : isDepartmentStaff
+                  ? "Department Access"
+                  : "Access"}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {isSystemAdmin
+              ? "Create departments and assign department admins."
+              : isDepartmentAdmin
+                ? `Manage staff and digitize tables for ${department.name}.`
+                : isDepartmentStaff
+                  ? `You have view-only access for ${department.name}.`
+                  : "No department role has been assigned to this account yet."}
+          </p>
+        </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Photo Input</CardTitle>
-          <CardDescription>Choose one method: camera or upload.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="camera-photo">Take Photo</Label>
-            <Input
-              id="camera-photo"
-              ref={cameraInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={onSelectFile}
-            />
-          </div>
+        <div className="flex flex-wrap gap-3">
+          {(isSystemAdmin || isDepartmentAdmin) && (
+            <Link to="/create" className={buttonVariants()}>
+              Create New
+            </Link>
+          )}
+          <Button
+            variant="outline"
+            disabled={signOutMutation.isPending}
+            onClick={() => void signOutMutation.mutateAsync()}
+          >
+            {signOutMutation.isPending ? "Logging out..." : "Logout"}
+          </Button>
+        </div>
+      </div>
 
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="upload-photo">Upload Photo</Label>
-            <Input
-              id="upload-photo"
-              ref={uploadInputRef}
-              type="file"
-              accept="image/*"
-              onChange={onSelectFile}
-            />
-          </div>
-
-          {previewUrl ? (
-            <img
-              src={previewUrl}
-              alt="Selected table preview"
-              className="max-h-96 w-full object-contain"
-            />
-          ) : null}
-
-          <div className="flex flex-wrap gap-3">
-            <Button
-              disabled={!selectedFile || scanMutation.isPending || createTableMutation.isPending}
-              onClick={scanTable}
-            >
-              {scanMutation.isPending ? "Scanning..." : "Scan Table"}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={!selectedFile && scanResult.length === 0 && !previewUrl}
-              onClick={clearSelection}
-            >
-              Clear
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {scanResult.length > 0 ? (
-        <Card ref={schemaEditorRef}>
+      {(isSystemAdmin || isDepartmentAdmin) && (
+        <Card>
           <CardHeader>
-            <CardTitle>Schema Editor</CardTitle>
+            <CardTitle>{isSystemAdmin ? "Created Department Admins" : "Created Staff"}</CardTitle>
             <CardDescription>
-              Edit column names and types before creating the DB table.
+              {isSystemAdmin
+                ? "Department admins created from this account are listed here."
+                : "Staff accounts created from this department admin account are listed here."}
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-5">
-            <div className="flex flex-col gap-2">
-              <Label>Detected Table</Label>
-              <Select
-                value={String(activeTableIndex)}
-                onValueChange={(value) => setSelectedTableIndex(Number(value))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select table">{selectedTableLabel}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {scanResult.map((_, index) => (
-                    <SelectItem key={`table-${index}`} value={String(index)}>
-                      Table {index + 1}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="table-name">Table Name</Label>
-              <Input
-                id="table-name"
-                placeholder="example: scanned_table"
-                value={tableName}
-                onChange={(event) => setTableName(event.target.value)}
-              />
-            </div>
-
-            <div className="flex flex-col gap-4">
-              {currentColumns.map((column, index) => (
-                <div key={`column-${index}`} className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <div className="flex flex-col gap-2 md:col-span-1">
-                    <Label htmlFor={`column-name-${index}`}>Column Name</Label>
-                    <Input
-                      id={`column-name-${index}`}
-                      value={column.name}
-                      onChange={(event) => updateColumnName(index, event.target.value)}
-                    />
+          <CardContent className="flex flex-col gap-3">
+            {managedUsersQuery.isLoading ? (
+              <p className="text-sm text-muted-foreground">Loading...</p>
+            ) : managedUsersQuery.isError ? (
+              <p className="text-sm text-destructive">
+                {managedUsersQuery.error instanceof Error
+                  ? managedUsersQuery.error.message
+                  : "Failed to load users."}
+              </p>
+            ) : managedUsersQuery.data && managedUsersQuery.data.data.items.length > 0 ? (
+              managedUsersQuery.data.data.items.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex flex-col gap-1 border p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex flex-col gap-1">
+                    <p className="font-medium">{item.user.name}</p>
+                    <p className="text-muted-foreground">{item.user.email}</p>
+                    {isSystemAdmin ? (
+                      <p className="text-muted-foreground">
+                        {item.department.name} ({item.department.slug})
+                      </p>
+                    ) : null}
                   </div>
-                  <div className="flex flex-col gap-2 md:col-span-1">
-                    <Label>Data Type</Label>
-                    <Select
-                      value={column.type}
-                      onValueChange={(value) => updateColumnType(index, value)}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue>{column.type}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableTypes.map((type) => (
-                          <SelectItem key={`${index}-${type}`} value={type}>
-                            {type}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex flex-col gap-2 md:col-span-1">
-                    <Label>Sample Values</Label>
-                    <p className="text-sm text-muted-foreground">
-                      {formatSampleValues(currentSampleColumns[index]?.values ?? [])}
-                    </p>
+                  <div className="text-sm text-muted-foreground">
+                    {item.user.username ? `@${item.user.username}` : item.role}
                   </div>
                 </div>
-              ))}
-            </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {isSystemAdmin ? "No department admins created yet." : "No staff created yet."}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center gap-3">
-                <Checkbox
-                  id="fill-data"
-                  checked={isFillDataEnabled}
-                  onCheckedChange={(checked) => setIsFillDataEnabled(checked === true)}
+      {canLoadDepartmentTables ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Tables</CardTitle>
+            <CardDescription>Open digitized tables for {department.name}.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {departmentTablesQuery.isLoading ? (
+              <p className="text-sm text-muted-foreground">Loading tables...</p>
+            ) : departmentTablesQuery.isError ? (
+              <p className="text-sm text-destructive">
+                {departmentTablesQuery.error instanceof Error
+                  ? departmentTablesQuery.error.message
+                  : "Failed to load tables."}
+              </p>
+            ) : departmentTablesQuery.data && departmentTablesQuery.data.data.tables.length > 0 ? (
+              departmentTablesQuery.data.data.tables.map((table) => (
+                <Link
+                  key={table.fullTableName}
+                  to="/$departmentSlug/$tableName"
+                  params={{
+                    departmentSlug: department.slug,
+                    tableName: table.tableName,
+                  }}
+                  className="border p-4 text-sm transition-colors hover:bg-muted"
+                >
+                  <div className="font-medium">{table.tableName}</div>
+                  <div className="text-muted-foreground">{table.fullTableName}</div>
+                </Link>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">No tables created yet.</p>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {isDepartmentAdmin ? (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Photo Input</CardTitle>
+              <CardDescription>Choose one method: camera or upload.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="camera-photo">Take Photo</Label>
+                <Input
+                  id="camera-photo"
+                  ref={cameraInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={onSelectFile}
                 />
-                <Label htmlFor="fill-data" className="cursor-pointer">
-                  Fill data from photo into table
-                </Label>
               </div>
 
-              <Button
-                disabled={
-                  scanMutation.isPending ||
-                  createTableMutation.isPending ||
-                  currentColumns.length === 0
-                }
-                onClick={createTable}
-              >
-                {createTableMutation.isPending ? "Creating..." : "Create Table"}
-              </Button>
-            </div>
-          </CardContent>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="upload-photo">Upload Photo</Label>
+                <Input
+                  id="upload-photo"
+                  ref={uploadInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={onSelectFile}
+                />
+              </div>
+
+              {previewUrl ? (
+                <img
+                  src={previewUrl}
+                  alt="Selected table preview"
+                  className="max-h-96 w-full object-contain"
+                />
+              ) : null}
+
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  disabled={
+                    !selectedFile || scanMutation.isPending || createTableMutation.isPending
+                  }
+                  onClick={scanTable}
+                >
+                  {scanMutation.isPending ? "Scanning..." : "Scan Table"}
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={!selectedFile && scanResult.length === 0 && !previewUrl}
+                  onClick={clearSelection}
+                >
+                  Clear
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {scanResult.length > 0 ? (
+            <Card ref={schemaEditorRef}>
+              <CardHeader>
+                <CardTitle>Schema Editor</CardTitle>
+                <CardDescription>
+                  Edit column names and types before creating the DB table.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-5">
+                <div className="flex flex-col gap-2">
+                  <Label>Detected Table</Label>
+                  <Select
+                    value={String(activeTableIndex)}
+                    onValueChange={(value) => setSelectedTableIndex(Number(value))}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select table">{selectedTableLabel}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {scanResult.map((_, index) => (
+                        <SelectItem key={`table-${index}`} value={String(index)}>
+                          Table {index + 1}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="table-name">Table Name</Label>
+                  <Input
+                    id="table-name"
+                    placeholder="example: scanned_table"
+                    value={tableName}
+                    onChange={(event) => setTableName(event.target.value)}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-4">
+                  {currentColumns.map((column, index) => (
+                    <div key={`column-${index}`} className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                      <div className="flex flex-col gap-2 md:col-span-1">
+                        <Label htmlFor={`column-required-${index}`}>Required</Label>
+                        <div className="flex h-10 items-center">
+                          <Checkbox
+                            id={`column-required-${index}`}
+                            checked={column.isRequired}
+                            onCheckedChange={(checked) =>
+                              updateColumnRequired(index, checked === true)
+                            }
+                          />
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-2 md:col-span-1">
+                        <Label htmlFor={`column-name-${index}`}>Column Name</Label>
+                        <Input
+                          id={`column-name-${index}`}
+                          value={column.name}
+                          onChange={(event) => updateColumnName(index, event.target.value)}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2 md:col-span-1">
+                        <Label>Data Type</Label>
+                        <Select
+                          value={column.type}
+                          onValueChange={(value) => updateColumnType(index, value)}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue>{column.type}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableTypes.map((type) => (
+                              <SelectItem key={`${index}-${type}`} value={type}>
+                                {type}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex flex-col gap-2 md:col-span-1">
+                        <Label>Sample Values</Label>
+                        <p className="text-sm text-muted-foreground">
+                          {formatSampleValues(currentSampleColumns[index]?.values ?? [])}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      id="fill-data"
+                      checked={isFillDataEnabled}
+                      onCheckedChange={(checked) => setIsFillDataEnabled(checked === true)}
+                    />
+                    <Label htmlFor="fill-data" className="cursor-pointer">
+                      Fill data from photo into table
+                    </Label>
+                  </div>
+
+                  <Button
+                    disabled={
+                      scanMutation.isPending ||
+                      createTableMutation.isPending ||
+                      currentColumns.length === 0
+                    }
+                    onClick={createTable}
+                  >
+                    {createTableMutation.isPending ? "Creating..." : "Create Table"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+        </>
+      ) : null}
+
+      {accessContext.role === "department_staff" ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>View Only</CardTitle>
+            <CardDescription>
+              Department staff can open tables and view department data but cannot create staff,
+              scan tables, or create tables.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      ) : null}
+
+      {accessContext.role === "unassigned" ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>No Role Assigned</CardTitle>
+            <CardDescription>
+              This account is signed in but has not been assigned a system or department role yet.
+            </CardDescription>
+          </CardHeader>
         </Card>
       ) : null}
     </main>

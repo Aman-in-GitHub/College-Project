@@ -1,4 +1,5 @@
 import { db } from "@/db/index.ts";
+import { userGlobalRoles } from "@/db/schema/department/index.ts";
 import { auth } from "@/lib/auth.ts";
 
 async function seed() {
@@ -13,6 +14,16 @@ async function seed() {
   });
 
   if (existingUser) {
+    await db
+      .insert(userGlobalRoles)
+      .values({
+        userId: existingUser.id,
+        role: "system_admin",
+      })
+      .onConflictDoNothing({
+        target: [userGlobalRoles.userId, userGlobalRoles.role],
+      });
+
     console.log("User already exists:", existingUser.email);
     return;
   }
@@ -26,6 +37,16 @@ async function seed() {
       displayUsername: "Aman",
     },
   });
+
+  await db
+    .insert(userGlobalRoles)
+    .values({
+      userId: authResponse.user.id,
+      role: "system_admin",
+    })
+    .onConflictDoNothing({
+      target: [userGlobalRoles.userId, userGlobalRoles.role],
+    });
 
   console.log("User created:", authResponse.user.email);
 }

@@ -11,5 +11,6 @@ export default defineConfig({
   schema: "./src/db/schema/index.ts",
   dbCredentials: {
     url: env.DATABASE_URL,
+    ssl: env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
   },
 });

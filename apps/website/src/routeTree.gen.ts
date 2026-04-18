@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedCreateRouteImport } from './routes/_authenticated/create'
+import { Route as AuthenticatedDepartmentSlugTableNameRouteImport } from './routes/_authenticated/$departmentSlug/$tableName'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -27,27 +29,50 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedCreateRoute = AuthenticatedCreateRouteImport.update({
+  id: '/create',
+  path: '/create',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedDepartmentSlugTableNameRoute =
+  AuthenticatedDepartmentSlugTableNameRouteImport.update({
+    id: '/$departmentSlug/$tableName',
+    path: '/$departmentSlug/$tableName',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
+  '/create': typeof AuthenticatedCreateRoute
+  '/$departmentSlug/$tableName': typeof AuthenticatedDepartmentSlugTableNameRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/create': typeof AuthenticatedCreateRoute
   '/': typeof AuthenticatedIndexRoute
+  '/$departmentSlug/$tableName': typeof AuthenticatedDepartmentSlugTableNameRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/login': typeof LoginRoute
+  '/_authenticated/create': typeof AuthenticatedCreateRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/$departmentSlug/$tableName': typeof AuthenticatedDepartmentSlugTableNameRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login'
+  fullPaths: '/' | '/login' | '/create' | '/$departmentSlug/$tableName'
   fileRoutesByTo: FileRoutesByTo
-  to: '/login' | '/'
-  id: '__root__' | '/_authenticated' | '/login' | '/_authenticated/'
+  to: '/login' | '/create' | '/' | '/$departmentSlug/$tableName'
+  id:
+    | '__root__'
+    | '/_authenticated'
+    | '/login'
+    | '/_authenticated/create'
+    | '/_authenticated/'
+    | '/_authenticated/$departmentSlug/$tableName'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -78,15 +103,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/create': {
+      id: '/_authenticated/create'
+      path: '/create'
+      fullPath: '/create'
+      preLoaderRoute: typeof AuthenticatedCreateRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/$departmentSlug/$tableName': {
+      id: '/_authenticated/$departmentSlug/$tableName'
+      path: '/$departmentSlug/$tableName'
+      fullPath: '/$departmentSlug/$tableName'
+      preLoaderRoute: typeof AuthenticatedDepartmentSlugTableNameRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
   }
 }
 
 interface AuthenticatedRouteChildren {
+  AuthenticatedCreateRoute: typeof AuthenticatedCreateRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedDepartmentSlugTableNameRoute: typeof AuthenticatedDepartmentSlugTableNameRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedCreateRoute: AuthenticatedCreateRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedDepartmentSlugTableNameRoute:
+    AuthenticatedDepartmentSlugTableNameRoute,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(

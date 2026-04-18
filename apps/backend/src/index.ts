@@ -8,7 +8,7 @@ import { secureHeaders } from "hono/secure-headers";
 
 import type { AppEnv } from "@/types/index.ts";
 
-import { db } from "@/db";
+import { db, postgresClient } from "@/db/index.ts";
 import { auth } from "@/lib/auth.ts";
 import {
   GLOBAL_RATE_LIMIT_MAX,
@@ -31,7 +31,7 @@ app.use(
     credentials: true,
     exposeHeaders: ["Content-Length"],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allowHeaders: ["Content-Type", "Authorization"],
+    allowHeaders: ["Content-Type", "Authorization", "x-department-id", "x-department-slug"],
     origin: [env.CLIENT_URL],
   }),
 );
@@ -183,6 +183,7 @@ async function shutdown(signal: Parameters<typeof process.on>[0], exitCode = 0):
 
   logger.info({ signal }, "Shutting down...");
   await server.stop();
+  await postgresClient.end();
   redis.close();
   logger.info("Shutdown complete");
   process.exit(exitCode);
