@@ -1237,7 +1237,6 @@ function RouteComponent() {
                                   onClick={() => deleteColumn(index)}
                                 >
                                   <TrashIcon className="mb-0.5 size-4" weight="bold" />
-                                  Delete
                                 </Button>
                               </TableCell>
                               <TableCell>

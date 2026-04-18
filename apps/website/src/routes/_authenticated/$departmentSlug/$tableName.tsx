@@ -4,9 +4,11 @@ import {
   DownloadSimpleIcon,
   EraserIcon,
   FileCsvIcon,
+  FloppyDiskIcon,
   MagnifyingGlassIcon,
   PlusIcon,
   TableIcon,
+  TrashIcon,
   UploadSimpleIcon,
 } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -1174,7 +1176,7 @@ function RouteComponent() {
                     disabled={!hasChanges || updateRowMutation.isPending || isDeletingCurrentRow}
                     onClick={() => handleSaveRow(row.original.id, rowDraft)}
                   >
-                    Save
+                    <FloppyDiskIcon className="mb-1 size-4" weight="bold" />
                   </Button>
                   <Button
                     size="sm"
@@ -1183,7 +1185,7 @@ function RouteComponent() {
                     disabled={deleteRowMutation.isPending || updateRowMutation.isPending}
                     onClick={() => handleDeleteRow(row.original.id)}
                   >
-                    {isDeletingCurrentRow ? "Deleting..." : "Delete"}
+                    <TrashIcon className="mb-1 size-4" weight="bold" />
                   </Button>
                 </div>
               );
