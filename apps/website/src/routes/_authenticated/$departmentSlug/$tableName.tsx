@@ -39,7 +39,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { EXPORT_FILE_FORMATS, SCROLL_DELAY_MS } from "@/lib/constants";
+import { EXPORT_FILE_FORMATS } from "@/lib/constants";
 import { env } from "@/lib/env";
 import {
   buildExportFilename,
@@ -132,6 +132,34 @@ type DeleteRowResponse = {
   message: string;
   data: null;
 };
+
+type DbColumnType = "text" | "integer" | "numeric" | "boolean" | "date" | "time" | "timestamp";
+
+type ScannedColumn = {
+  name: string;
+  inferredType: DbColumnType;
+  values: string[];
+};
+
+type ScanTable = {
+  columns: ScannedColumn[];
+};
+
+type ScanResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    department: {
+      id: string;
+      name: string;
+      slug: string;
+    } | null;
+    tables: ScanTable[];
+    columnTypes: DbColumnType[];
+  };
+};
+
+type ImportSource = "paddle" | "gemini";
 
 type EditableTableCellProps = {
   canEdit: boolean;
@@ -234,6 +262,17 @@ function isDeleteRowResponse(value: unknown): value is DeleteRowResponse {
     typeof value.success === "boolean" &&
     typeof value.message === "string" &&
     value.data === null
+  );
+}
+
+function isScanResponse(value: unknown): value is ScanResponse {
+  return (
+    isRecord(value) &&
+    typeof value.success === "boolean" &&
+    typeof value.message === "string" &&
+    isRecord(value.data) &&
+    Array.isArray(value.data.tables) &&
+    Array.isArray(value.data.columnTypes)
   );
 }
 
@@ -434,6 +473,20 @@ async function importTableRowsFromImage(params: {
   departmentSlug: string;
   tableName: string;
   file: File;
+  source: ImportSource;
+  columns: TableColumn[];
+}): Promise<ImportRowsResponse> {
+  if (params.source === "gemini") {
+    return importTableRowsFromGemini(params);
+  }
+
+  return importTableRowsFromFastApi(params);
+}
+
+async function importTableRowsFromGemini(params: {
+  departmentSlug: string;
+  tableName: string;
+  file: File;
 }): Promise<ImportRowsResponse> {
   const formData = new FormData();
   formData.append("file", params.file, params.file.name);
@@ -462,6 +515,151 @@ async function importTableRowsFromImage(params: {
   }
 
   return body;
+}
+
+function normalizeImportColumnName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function getScanRows(columns: ScannedColumn[]): string[][] {
+  const rowCount = columns.reduce(
+    (maxCount, column) => Math.max(maxCount, column.values.length),
+    0,
+  );
+
+  return Array.from({ length: rowCount }, (_, rowIndex) =>
+    columns.map((column) => column.values[rowIndex] ?? ""),
+  );
+}
+
+function selectBestMatchingScanTable(
+  tables: ScanTable[],
+  columns: TableColumn[],
+): ScanTable | null {
+  if (tables.length === 0) {
+    return null;
+  }
+
+  const editableColumnNames = new Set(
+    columns
+      .filter((column) => column.columnName !== "id")
+      .map((column) => normalizeImportColumnName(column.columnName)),
+  );
+
+  const rankedTables = tables.map((table) => {
+    const matchCount = table.columns.reduce((count, column) => {
+      return count + (editableColumnNames.has(normalizeImportColumnName(column.name)) ? 1 : 0);
+    }, 0);
+
+    return {
+      table,
+      matchCount,
+    };
+  });
+
+  rankedTables.sort((left, right) => right.matchCount - left.matchCount);
+
+  return rankedTables[0]?.table ?? null;
+}
+
+function buildImportedRowsFromScan(scanTable: ScanTable, columns: TableColumn[]) {
+  const editableColumns = columns.filter((column) => column.columnName !== "id");
+  const scannedColumnMap = new Map(
+    scanTable.columns.map((column) => [normalizeImportColumnName(column.name), column]),
+  );
+  const scanRows = getScanRows(scanTable.columns);
+
+  return scanRows
+    .map((_, rowIndex) => {
+      const values = editableColumns.reduce<Record<string, string | null>>((result, column) => {
+        const scannedColumn = scannedColumnMap.get(normalizeImportColumnName(column.columnName));
+        const nextValue = scannedColumn?.values[rowIndex]?.trim() ?? "";
+
+        result[column.columnName] = nextValue.length > 0 ? nextValue : null;
+        return result;
+      }, {});
+
+      return values;
+    })
+    .filter((row) => Object.values(row).some((value) => value !== null && value.trim().length > 0));
+}
+
+async function importTableRowsFromFastApi(params: {
+  departmentSlug: string;
+  tableName: string;
+  file: File;
+  columns: TableColumn[];
+}): Promise<ImportRowsResponse> {
+  const formData = new FormData();
+  formData.append("file", params.file, params.file.name);
+
+  const { response, body } = await fetchApiJson(`${env.VITE_FASTAPI_URL}/api/table/scan`, {
+    method: "POST",
+    credentials: "omit",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    if (isRecord(body) && typeof body.message === "string") {
+      throw new Error(body.message);
+    }
+
+    if (isRecord(body) && typeof body.detail === "string") {
+      throw new Error(body.detail);
+    }
+
+    throw new Error("Failed to scan rows from image.");
+  }
+
+  if (!isScanResponse(body)) {
+    throw new Error("Invalid scan response.");
+  }
+
+  const scanTable = selectBestMatchingScanTable(body.data.tables, params.columns);
+
+  if (scanTable === null) {
+    return {
+      success: true,
+      message: "No matching table rows were found in the uploaded image.",
+      data: {
+        insertedRowCount: 0,
+      },
+    };
+  }
+
+  const rowsToInsert = buildImportedRowsFromScan(scanTable, params.columns);
+
+  if (rowsToInsert.length === 0) {
+    return {
+      success: true,
+      message: "No matching table rows were found in the uploaded image.",
+      data: {
+        insertedRowCount: 0,
+      },
+    };
+  }
+
+  for (const values of rowsToInsert) {
+    await addTableRow({
+      departmentSlug: params.departmentSlug,
+      tableName: params.tableName,
+      values,
+    });
+  }
+
+  return {
+    success: true,
+    message: `${rowsToInsert.length} row(s) imported successfully.`,
+    data: {
+      insertedRowCount: rowsToInsert.length,
+    },
+  };
 }
 
 async function importTableRowsFromCsv(params: {
@@ -547,12 +745,12 @@ function RouteComponent() {
   const [isExportingAll, setIsExportingAll] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFileFormat>("xlsx");
   const [deletingRowId, setDeletingRowId] = useState<string | null>(null);
+  const [activeImportSource, setActiveImportSource] = useState<ImportSource | null>(null);
   const debouncedSearchTerm = useDebouncedValue(searchTerm, 300);
   const editedRowsRef = useRef(editedRows);
   const importCameraInputRef = useRef<HTMLInputElement | null>(null);
   const importUploadInputRef = useRef<HTMLInputElement | null>(null);
   const importCsvInputRef = useRef<HTMLInputElement | null>(null);
-  const importPreviewRef = useRef<HTMLImageElement | null>(null);
   editedRowsRef.current = editedRows;
 
   useEffect(() => {
@@ -568,31 +766,6 @@ function RouteComponent() {
       URL.revokeObjectURL(objectUrl);
     };
   }, [selectedImportFile]);
-
-  const scrollImportPreviewIntoView = useEffectEvent(() => {
-    importPreviewRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-  });
-
-  const scheduleSmoothScroll = useEffectEvent((scrollFn: () => void) => {
-    const timeoutId = window.setTimeout(() => {
-      scrollFn();
-    }, SCROLL_DELAY_MS);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  });
-
-  useEffect(() => {
-    if (!importPreviewUrl || !selectedImportFile?.type.startsWith("image/")) {
-      return;
-    }
-
-    return scheduleSmoothScroll(scrollImportPreviewIntoView);
-  }, [importPreviewUrl, scheduleSmoothScroll, scrollImportPreviewIntoView, selectedImportFile]);
 
   const tableQuery = useQuery({
     queryKey: [...tableQueryKey, debouncedSearchTerm, pagination.pageIndex, pagination.pageSize],
@@ -638,6 +811,7 @@ function RouteComponent() {
   const importRowsMutation = useMutation({
     mutationFn: importTableRowsFromImage,
     onSuccess: (payload) => {
+      setActiveImportSource(null);
       showSuccessToast(payload.message);
       setSelectedImportFile(null);
 
@@ -658,6 +832,7 @@ function RouteComponent() {
       });
     },
     onError: (error) => {
+      setActiveImportSource(null);
       showErrorToast(error instanceof Error ? error.message : "Failed to import rows.");
     },
   });
@@ -917,6 +1092,14 @@ function RouteComponent() {
   }
 
   function handleImportRows() {
+    void handleImportRowsWithSource("paddle");
+  }
+
+  function handleImportRowsWithGemini() {
+    void handleImportRowsWithSource("gemini");
+  }
+
+  async function handleImportRowsWithSource(source: ImportSource) {
     if (!selectedImportFile) {
       showWarningToast("Please take or upload a file first.");
       return;
@@ -937,10 +1120,13 @@ function RouteComponent() {
       return;
     }
 
-    void importRowsMutation.mutateAsync({
+    setActiveImportSource(source);
+    await importRowsMutation.mutateAsync({
       departmentSlug: params.departmentSlug,
       tableName: params.tableName,
       file: selectedImportFile,
+      source,
+      columns: tableColumns,
     });
   }
 
@@ -1128,14 +1314,16 @@ function RouteComponent() {
 
                 <AnimatePresence initial={false}>
                   {importPreviewUrl && selectedImportFile?.type.startsWith("image/") ? (
-                    <motion.img
+                    <motion.div
                       key="import-preview"
-                      ref={importPreviewRef}
-                      src={importPreviewUrl}
-                      alt="Selected rows import preview"
-                      className="max-h-80 w-full object-contain"
                       {...getExitAnimationProps(isReducedMotion, 10)}
-                    />
+                    >
+                      <img
+                        src={importPreviewUrl}
+                        alt="Selected rows import preview"
+                        className="max-h-80 w-full object-contain"
+                      />
+                    </motion.div>
                   ) : null}
                 </AnimatePresence>
 
@@ -1151,9 +1339,26 @@ function RouteComponent() {
                     onClick={handleImportRows}
                   >
                     <UploadSimpleIcon className="mb-1 size-4" weight="bold" />
-                    {importRowsMutation.isPending || importCsvMutation.isPending
+                    {(importRowsMutation.isPending && activeImportSource === "paddle") ||
+                    importCsvMutation.isPending
                       ? "Importing..."
                       : "Import Rows"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full sm:w-auto"
+                    disabled={
+                      !selectedImportFile ||
+                      importRowsMutation.isPending ||
+                      importCsvMutation.isPending
+                    }
+                    onClick={handleImportRowsWithGemini}
+                  >
+                    <UploadSimpleIcon className="mb-1 size-4" weight="bold" />
+                    {importRowsMutation.isPending && activeImportSource === "gemini"
+                      ? "Importing..."
+                      : "Import With Gemini"}
                   </Button>
                   <Button
                     type="button"

@@ -6,6 +6,7 @@ import {
   PlusIcon,
   SignOutIcon,
   TableIcon,
+  TrashIcon,
   UsersThreeIcon,
 } from "@phosphor-icons/react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -75,6 +76,13 @@ type EditableColumn = {
   name: string;
   type: DbColumnType;
   isRequired: boolean;
+  sourceIndex: number;
+};
+
+type CreateTableColumn = {
+  name: string;
+  type: DbColumnType;
+  isRequired: boolean;
 };
 
 type ScanTable = {
@@ -94,6 +102,8 @@ type ScanResponse = {
     columnTypes: DbColumnType[];
   };
 };
+
+type ScanSource = "paddle" | "gemini";
 
 type CreateTableResponse = {
   success: boolean;
@@ -160,14 +170,17 @@ type DepartmentTablesResponse = {
   };
 };
 
-function toScanRows(columns: ScannedColumn[]): string[][] {
-  const rowCount = columns.reduce(
+function toScanRows(columns: EditableColumn[], sampleColumns: ScannedColumn[]): string[][] {
+  const selectedColumns = columns
+    .map((column) => sampleColumns[column.sourceIndex] ?? null)
+    .filter((column): column is ScannedColumn => column !== null);
+  const rowCount = selectedColumns.reduce(
     (maxCount, column) => Math.max(maxCount, column.values.length),
     0,
   );
 
   return Array.from({ length: rowCount }, (_, rowIndex) =>
-    columns.map((column) => column.values[rowIndex] ?? ""),
+    selectedColumns.map((column) => column.values[rowIndex] ?? ""),
   );
 }
 
@@ -380,20 +393,28 @@ async function fetchDepartmentTables(departmentSlug: string): Promise<Department
 async function scanTableRequest({
   departmentSlug,
   file,
+  source,
   requestId: _requestId,
 }: {
   departmentSlug: string;
   file: File;
+  source: ScanSource;
   requestId: number;
 }): Promise<ScanResponse> {
   const formData = new FormData();
   formData.append("file", file, file.name);
-
-  const { response, body } = await fetchApiJson(`${env.VITE_SERVER_URL}/api/table/scan`, {
+  const isGeminiScan = source === "gemini";
+  const scanUrl = isGeminiScan
+    ? `${env.VITE_SERVER_URL}/api/table/scan`
+    : `${env.VITE_FASTAPI_URL}/api/table/scan`;
+  const { response, body } = await fetchApiJson(scanUrl, {
     method: "POST",
-    headers: {
-      "x-department-slug": departmentSlug,
-    },
+    headers: isGeminiScan
+      ? {
+          "x-department-slug": departmentSlug,
+        }
+      : undefined,
+    credentials: isGeminiScan ? "include" : "omit",
     body: formData,
   });
 
@@ -404,6 +425,10 @@ async function scanTableRequest({
 
     if (isRecord(body) && typeof body.error === "string") {
       throw new Error(body.error);
+    }
+
+    if (isRecord(body) && typeof body.detail === "string") {
+      throw new Error(body.detail);
     }
 
     throw new Error("Scan failed");
@@ -419,7 +444,7 @@ async function scanTableRequest({
 async function createTableRequest(payload: {
   departmentSlug: string;
   tableName: string;
-  columns: EditableColumn[];
+  columns: CreateTableColumn[];
   fillData: boolean;
   rows: string[][];
 }): Promise<CreateTableResponse> {
@@ -486,6 +511,7 @@ function RouteComponent() {
   const [selectedTableIndex, setSelectedTableIndex] = useState(0);
   const [tableName, setTableName] = useState("");
   const [isFillDataEnabled, setIsFillDataEnabled] = useState(true);
+  const [activeScanSource, setActiveScanSource] = useState<ScanSource | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const schemaEditorRef = useRef<HTMLDivElement | null>(null);
@@ -552,14 +578,16 @@ function RouteComponent() {
 
       setEditableSchemas(
         payload.data.tables.map((table) =>
-          table.columns.map((column) => ({
+          table.columns.map((column, index) => ({
             name: column.name,
             type: column.inferredType,
             isRequired: false,
+            sourceIndex: index,
           })),
         ),
       );
       setSelectedTableIndex(0);
+      setActiveScanSource(null);
 
       if (payload.data.tables.length > 0) {
         showInfoToast(payload.message || "Table scan complete.");
@@ -572,6 +600,7 @@ function RouteComponent() {
         return;
       }
 
+      setActiveScanSource(null);
       showErrorToast(error instanceof Error ? error.message : "Scan failed");
     },
   });
@@ -635,7 +664,7 @@ function RouteComponent() {
 
   const currentColumns = editableSchemas[activeTableIndex] ?? [];
   const currentSampleColumns = scanResult[activeTableIndex]?.columns ?? [];
-  const currentRows = toScanRows(currentSampleColumns);
+  const currentRows = toScanRows(currentColumns, currentSampleColumns);
   const detectedTableOptions = scanResult.map((_, index) => ({
     value: String(index),
     label: `Table ${index + 1}`,
@@ -674,6 +703,7 @@ function RouteComponent() {
     setSelectedTableIndex(0);
     setTableName("");
     setIsFillDataEnabled(true);
+    setActiveScanSource(null);
     scanMutation.reset();
     createTableMutation.reset();
   }
@@ -705,6 +735,14 @@ function RouteComponent() {
   }
 
   async function scanTable() {
+    await scanTableWithSource("paddle");
+  }
+
+  async function retryWithGemini() {
+    await scanTableWithSource("gemini");
+  }
+
+  async function scanTableWithSource(source: ScanSource) {
     if (!selectedFile) {
       showWarningToast("Please take or upload a photo first.");
       return;
@@ -715,9 +753,11 @@ function RouteComponent() {
       return;
     }
 
+    setActiveScanSource(source);
     await scanMutation.mutateAsync({
       departmentSlug: department.slug,
       file: selectedFile,
+      source,
       requestId: ++scanRequestIdRef.current,
     });
   }
@@ -766,6 +806,18 @@ function RouteComponent() {
     );
   }
 
+  function deleteColumn(columnIndex: number) {
+    setEditableSchemas((previous) =>
+      previous.map((tableColumns, tableIndex) => {
+        if (tableIndex !== activeTableIndex) {
+          return tableColumns;
+        }
+
+        return tableColumns.filter((_, index) => index !== columnIndex);
+      }),
+    );
+  }
+
   async function createTable() {
     if (currentColumns.length === 0) {
       showWarningToast("No scanned columns to create a table from.");
@@ -785,7 +837,11 @@ function RouteComponent() {
     await createTableMutation.mutateAsync({
       departmentSlug: department.slug,
       tableName,
-      columns: currentColumns,
+      columns: currentColumns.map((column) => ({
+        name: column.name,
+        type: column.type,
+        isRequired: column.isRequired,
+      })),
       fillData: isFillDataEnabled,
       rows: isFillDataEnabled ? currentRows : [],
     });
@@ -844,129 +900,137 @@ function RouteComponent() {
         </div>
       </motion.div>
 
-      {(isSystemAdmin || isDepartmentAdmin) && (
-        <motion.div {...getEnterAnimationProps(isReducedMotion, 0.06, 14)}>
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <UsersThreeIcon className="mb-1 size-5 text-primary" weight="duotone" />
-                {isSystemAdmin ? "Created Department Admins" : "Created Staff"}
-              </CardTitle>
-              <CardDescription>
-                {isSystemAdmin
-                  ? "Department admins created from this account are listed here."
-                  : "Staff accounts created from this department admin account are listed here."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              {managedUsersQuery.isLoading ? (
-                <p className="text-sm text-muted-foreground">Loading...</p>
-              ) : managedUsersQuery.isError ? (
-                <p className="text-sm text-destructive">
-                  {managedUsersQuery.error instanceof Error
-                    ? managedUsersQuery.error.message
-                    : "Failed to load users."}
-                </p>
-              ) : managedUsersQuery.data && managedUsersQuery.data.data.items.length > 0 ? (
-                managedUsersQuery.data.data.items.map((item, index) => (
-                  <motion.div
-                    key={item.id}
-                    className="flex flex-col gap-1 border p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
-                    {...getEnterAnimationProps(isReducedMotion, index * 0.03, 8)}
-                  >
-                    <div className="flex flex-col gap-1">
-                      <p className="font-medium">{item.user.name}</p>
-                      <p className="text-muted-foreground">{item.user.email}</p>
-                      {isSystemAdmin ? (
-                        <p className="text-muted-foreground">
-                          {item.department.name} ({item.department.slug})
-                        </p>
-                      ) : null}
-                      {item.user.isBanned ? <p className="text-destructive">Banned</p> : null}
-                    </div>
-                    <div className="flex flex-col gap-3 sm:items-end">
-                      <div className="text-sm text-muted-foreground">
-                        {item.user.username ? `@${item.user.username}` : item.role}
-                      </div>
-                      <Button
-                        type="button"
-                        variant={item.user.isBanned ? "outline" : "destructive"}
-                        className="w-full sm:w-auto"
-                        disabled={banUserMutation.isPending || unbanUserMutation.isPending}
-                        onClick={() =>
-                          item.user.isBanned
-                            ? void unbanUserMutation.mutateAsync(item.user.id)
-                            : void banUserMutation.mutateAsync(item.user.id)
-                        }
+      {(isSystemAdmin || isDepartmentAdmin || canLoadDepartmentTables) && (
+        <div className="grid gap-6 xl:grid-cols-2">
+          {(isSystemAdmin || isDepartmentAdmin) && (
+            <motion.div {...getEnterAnimationProps(isReducedMotion, 0.06, 14)}>
+              <Card className="h-full">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <UsersThreeIcon className="mb-1 size-5 text-primary" weight="duotone" />
+                    {isSystemAdmin ? "Created Department Admins" : "Created Staff"}
+                  </CardTitle>
+                  <CardDescription>
+                    {isSystemAdmin
+                      ? "Department admins created from this account are listed here."
+                      : "Staff accounts created from this department admin account are listed here."}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-3">
+                  {managedUsersQuery.isLoading ? (
+                    <p className="text-sm text-muted-foreground">Loading...</p>
+                  ) : managedUsersQuery.isError ? (
+                    <p className="text-sm text-destructive">
+                      {managedUsersQuery.error instanceof Error
+                        ? managedUsersQuery.error.message
+                        : "Failed to load users."}
+                    </p>
+                  ) : managedUsersQuery.data && managedUsersQuery.data.data.items.length > 0 ? (
+                    managedUsersQuery.data.data.items.map((item, index) => (
+                      <motion.div
+                        key={item.id}
+                        className="flex flex-col gap-1 border p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
+                        {...getEnterAnimationProps(isReducedMotion, index * 0.03, 8)}
                       >
-                        {item.user.isBanned
-                          ? unbanUserMutation.isPending
-                            ? "Unbanning..."
-                            : "Unban"
-                          : banUserMutation.isPending
-                            ? "Banning..."
-                            : "Ban"}
-                      </Button>
-                    </div>
-                  </motion.div>
-                ))
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {isSystemAdmin ? "No department admins created yet." : "No staff created yet."}
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
+                        <div className="flex flex-col gap-1">
+                          <p className="font-medium">{item.user.name}</p>
+                          <p className="text-muted-foreground">{item.user.email}</p>
+                          {isSystemAdmin ? (
+                            <p className="text-muted-foreground">
+                              {item.department.name} ({item.department.slug})
+                            </p>
+                          ) : null}
+                          {item.user.isBanned ? <p className="text-destructive">Banned</p> : null}
+                        </div>
+                        <div className="flex flex-col gap-3 sm:items-end">
+                          <div className="text-sm text-muted-foreground">
+                            {item.user.username ? `@${item.user.username}` : item.role}
+                          </div>
+                          <Button
+                            type="button"
+                            variant={item.user.isBanned ? "outline" : "destructive"}
+                            className="w-full sm:w-auto"
+                            disabled={banUserMutation.isPending || unbanUserMutation.isPending}
+                            onClick={() =>
+                              item.user.isBanned
+                                ? void unbanUserMutation.mutateAsync(item.user.id)
+                                : void banUserMutation.mutateAsync(item.user.id)
+                            }
+                          >
+                            {item.user.isBanned
+                              ? unbanUserMutation.isPending
+                                ? "Unbanning..."
+                                : "Unban"
+                              : banUserMutation.isPending
+                                ? "Banning..."
+                                : "Ban"}
+                          </Button>
+                        </div>
+                      </motion.div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      {isSystemAdmin
+                        ? "No department admins created yet."
+                        : "No staff created yet."}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
 
-      {canLoadDepartmentTables ? (
-        <motion.div {...getEnterAnimationProps(isReducedMotion, 0.09, 14)}>
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TableIcon className="mb-1 size-5 text-primary" weight="duotone" />
-                Tables
-              </CardTitle>
-              <CardDescription>Open digitized tables for {department.name}.</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              {departmentTablesQuery.isLoading ? (
-                <p className="text-sm text-muted-foreground">Loading tables...</p>
-              ) : departmentTablesQuery.isError ? (
-                <p className="text-sm text-destructive">
-                  {departmentTablesQuery.error instanceof Error
-                    ? departmentTablesQuery.error.message
-                    : "Failed to load tables."}
-                </p>
-              ) : departmentTablesQuery.data &&
-                departmentTablesQuery.data.data.tables.length > 0 ? (
-                departmentTablesQuery.data.data.tables.map((table, index) => (
-                  <motion.div
-                    key={table.fullTableName}
-                    {...getEnterAnimationProps(isReducedMotion, index * 0.03, 8)}
-                    {...getHoverLiftProps(isReducedMotion)}
-                  >
-                    <Link
-                      to="/$departmentSlug/$tableName"
-                      params={{
-                        departmentSlug: department.slug,
-                        tableName: table.tableName,
-                      }}
-                      className="block border p-4 text-sm transition-colors hover:bg-muted"
-                    >
-                      <div className="font-medium">{table.tableName}</div>
-                      <div className="text-muted-foreground">{table.fullTableName}</div>
-                    </Link>
-                  </motion.div>
-                ))
-              ) : (
-                <p className="text-sm text-muted-foreground">No tables created yet.</p>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
-      ) : null}
+          {canLoadDepartmentTables ? (
+            <motion.div {...getEnterAnimationProps(isReducedMotion, 0.09, 14)}>
+              <Card className="h-full">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <TableIcon className="mb-1 size-5 text-primary" weight="duotone" />
+                    Tables
+                  </CardTitle>
+                  <CardDescription>Open digitized tables for {department.name}.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-3 sm:grid-cols-2">
+                  {departmentTablesQuery.isLoading ? (
+                    <p className="text-sm text-muted-foreground sm:col-span-2">Loading tables...</p>
+                  ) : departmentTablesQuery.isError ? (
+                    <p className="text-sm text-destructive sm:col-span-2">
+                      {departmentTablesQuery.error instanceof Error
+                        ? departmentTablesQuery.error.message
+                        : "Failed to load tables."}
+                    </p>
+                  ) : departmentTablesQuery.data &&
+                    departmentTablesQuery.data.data.tables.length > 0 ? (
+                    departmentTablesQuery.data.data.tables.map((table, index) => (
+                      <motion.div
+                        key={table.fullTableName}
+                        {...getEnterAnimationProps(isReducedMotion, index * 0.03, 8)}
+                        {...getHoverLiftProps(isReducedMotion)}
+                      >
+                        <Link
+                          to="/$departmentSlug/$tableName"
+                          params={{
+                            departmentSlug: department.slug,
+                            tableName: table.tableName,
+                          }}
+                          className="block h-full border p-4 text-sm transition-colors hover:bg-muted"
+                        >
+                          <div className="font-medium">{table.tableName}</div>
+                          <div className="text-muted-foreground">{table.fullTableName}</div>
+                        </Link>
+                      </motion.div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground sm:col-span-2">
+                      No tables created yet.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            </motion.div>
+          ) : null}
+        </div>
+      )}
 
       {isDepartmentAdmin ? (
         <>
@@ -1032,7 +1096,23 @@ function RouteComponent() {
                     onClick={scanTable}
                   >
                     <MagnifyingGlassIcon className="mb-1 size-4" weight="bold" />
-                    {scanMutation.isPending ? "Scanning..." : "Scan Table"}
+                    {scanMutation.isPending && activeScanSource === "paddle"
+                      ? "Scanning..."
+                      : "Scan Table"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full sm:w-auto"
+                    disabled={
+                      !selectedFile || scanMutation.isPending || createTableMutation.isPending
+                    }
+                    onClick={() => void retryWithGemini()}
+                  >
+                    <MagnifyingGlassIcon className="mb-1 size-4" weight="bold" />
+                    {scanMutation.isPending && activeScanSource === "gemini"
+                      ? "Scanning..."
+                      : "Scan With Gemini"}
                   </Button>
                   <Button
                     type="button"
@@ -1101,6 +1181,7 @@ function RouteComponent() {
                       <Table>
                         <TableHeader>
                           <TableRow>
+                            <TableHead className="w-24">Delete</TableHead>
                             <TableHead className="w-24">Required</TableHead>
                             <TableHead className="min-w-48">Column Name</TableHead>
                             <TableHead className="w-56">Data Type</TableHead>
@@ -1110,6 +1191,18 @@ function RouteComponent() {
                         <TableBody>
                           {currentColumns.map((column, index) => (
                             <TableRow key={`column-${index}`}>
+                              <TableCell>
+                                <Button
+                                  type="button"
+                                  variant="destructive"
+                                  size="sm"
+                                  disabled={currentColumns.length <= 1}
+                                  onClick={() => deleteColumn(index)}
+                                >
+                                  <TrashIcon className="mb-0.5 size-4" weight="bold" />
+                                  Delete
+                                </Button>
+                              </TableCell>
                               <TableCell>
                                 <Checkbox
                                   id={`column-required-${index}`}
@@ -1148,7 +1241,9 @@ function RouteComponent() {
                                 </Select>
                               </TableCell>
                               <TableCell className="text-sm text-muted-foreground">
-                                {formatSampleValues(currentSampleColumns[index]?.values ?? [])}
+                                {formatSampleValues(
+                                  currentSampleColumns[column.sourceIndex]?.values ?? [],
+                                )}
                               </TableCell>
                             </TableRow>
                           ))}
@@ -1168,18 +1263,39 @@ function RouteComponent() {
                         </Label>
                       </div>
 
-                      <Button
-                        type="button"
-                        disabled={
-                          scanMutation.isPending ||
-                          createTableMutation.isPending ||
-                          currentColumns.length === 0
-                        }
-                        onClick={createTable}
-                      >
-                        <PlusIcon className="mb-1 size-4" weight="bold" />
-                        {createTableMutation.isPending ? "Creating..." : "Create Table"}
-                      </Button>
+                      <div className="flex flex-col gap-3 lg:flex-row">
+                        <Button
+                          type="button"
+                          disabled={
+                            scanMutation.isPending ||
+                            createTableMutation.isPending ||
+                            currentColumns.length === 0
+                          }
+                          className="w-full lg:w-auto"
+                          onClick={createTable}
+                        >
+                          <PlusIcon className="mb-1 size-4" weight="bold" />
+                          {createTableMutation.isPending ? "Creating..." : "Create Table"}
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="w-full lg:w-auto"
+                          disabled={
+                            !selectedFile ||
+                            scanMutation.isPending ||
+                            createTableMutation.isPending ||
+                            currentColumns.length === 0
+                          }
+                          onClick={() => void retryWithGemini()}
+                        >
+                          <MagnifyingGlassIcon className="mb-1 size-4" weight="bold" />
+                          {scanMutation.isPending && activeScanSource === "gemini"
+                            ? "Scanning..."
+                            : "Retry With Gemini"}
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
