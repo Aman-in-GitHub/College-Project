@@ -39,7 +39,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { EXPORT_FILE_FORMATS } from "@/lib/constants";
+import { EXPORT_FILE_FORMATS, SCROLL_DELAY_MS } from "@/lib/constants";
 import { env } from "@/lib/env";
 import {
   buildExportFilename,
@@ -577,18 +577,12 @@ function RouteComponent() {
   });
 
   const scheduleSmoothScroll = useEffectEvent((scrollFn: () => void) => {
-    let firstAnimationFrameId = 0;
-    let secondAnimationFrameId = 0;
-
-    firstAnimationFrameId = window.requestAnimationFrame(() => {
-      secondAnimationFrameId = window.requestAnimationFrame(() => {
-        scrollFn();
-      });
-    });
+    const timeoutId = window.setTimeout(() => {
+      scrollFn();
+    }, SCROLL_DELAY_MS);
 
     return () => {
-      window.cancelAnimationFrame(firstAnimationFrameId);
-      window.cancelAnimationFrame(secondAnimationFrameId);
+      window.clearTimeout(timeoutId);
     };
   });
 

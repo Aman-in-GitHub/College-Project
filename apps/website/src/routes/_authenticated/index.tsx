@@ -36,7 +36,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { authClient } from "@/lib/auth";
-import { FALLBACK_COLUMN_TYPES } from "@/lib/constants";
+import { FALLBACK_COLUMN_TYPES, SCROLL_DELAY_MS } from "@/lib/constants";
 import { env } from "@/lib/env";
 import {
   fetchApiJson,
@@ -623,18 +623,12 @@ function RouteComponent() {
   });
 
   const scheduleSmoothScroll = useEffectEvent((scrollFn: () => void) => {
-    let firstAnimationFrameId = 0;
-    let secondAnimationFrameId = 0;
-
-    firstAnimationFrameId = window.requestAnimationFrame(() => {
-      secondAnimationFrameId = window.requestAnimationFrame(() => {
-        scrollFn();
-      });
-    });
+    const timeoutId = window.setTimeout(() => {
+      scrollFn();
+    }, SCROLL_DELAY_MS);
 
     return () => {
-      window.cancelAnimationFrame(firstAnimationFrameId);
-      window.cancelAnimationFrame(secondAnimationFrameId);
+      window.clearTimeout(timeoutId);
     };
   });
 
