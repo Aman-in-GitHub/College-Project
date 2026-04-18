@@ -39,10 +39,10 @@ function RootLayout() {
   return (
     <>
       <HeadContent />
-      <ProgressProvider color="blue" height="4px">
+      <ProgressProvider color="#432dd7" height="4px">
         <NavigationProgress />
         <Outlet />
-        <Toaster position="top-center" duration={3000} visibleToasts={3} richColors={true} />
+        <Toaster position="top-center" duration={5000} visibleToasts={3} richColors={true} />
       </ProgressProvider>
     </>
   );
