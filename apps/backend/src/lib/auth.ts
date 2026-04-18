@@ -21,4 +21,11 @@ export const auth = betterAuth({
     usePlural: true,
   }),
   trustedOrigins: [env.CLIENT_URL],
+  advanced: {
+    defaultCookieAttributes: {
+      secure: true,
+      sameSite: "none",
+      partitioned: true,
+    },
+  },
 });
