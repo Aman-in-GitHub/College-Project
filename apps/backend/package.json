@@ -12,6 +12,8 @@
     "dev": "bun db:migrate && bun db:seed && bun db:studio & bun run --hot src/index.ts"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.64",
+    "ai": "^6.0.168",
     "better-auth": "^1.6.5",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.14",

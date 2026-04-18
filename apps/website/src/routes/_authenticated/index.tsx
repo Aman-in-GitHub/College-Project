@@ -1,5 +1,6 @@
+import { useMutation } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -55,15 +56,143 @@ type ScanResponse = {
   };
 };
 
+type ErrorResponse = {
+  message?: string;
+  data?: {
+    issues?: Array<{
+      path: string;
+      message: string;
+    }>;
+  };
+};
+
+type CreateTableResponse = {
+  success: boolean;
+  message: string;
+};
+
+function isDbColumnType(value: string | null): value is DbColumnType {
+  return value !== null && FALLBACK_COLUMN_TYPES.includes(value as DbColumnType);
+}
+
+function isScanResponse(value: unknown): value is ScanResponse {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<ScanResponse>;
+
+  return (
+    typeof candidate.success === "boolean" &&
+    typeof candidate.message === "string" &&
+    Boolean(candidate.data) &&
+    Array.isArray(candidate.data?.tables) &&
+    Array.isArray(candidate.data?.columnTypes)
+  );
+}
+
+function isCreateTableResponse(value: unknown): value is CreateTableResponse {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<CreateTableResponse>;
+
+  return typeof candidate.success === "boolean" && typeof candidate.message === "string";
+}
+
+async function scanTableRequest(file: File): Promise<ScanResponse> {
+  const formData = new FormData();
+  formData.append("file", file, file.name);
+
+  const response = await fetch(`${env.VITE_SERVER_URL}/api/table/scan`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+
+  const payload: unknown = await response.json();
+
+  if (!response.ok) {
+    const errorPayload = payload as ErrorResponse;
+    throw new Error(errorPayload.message ?? "Scan failed");
+  }
+
+  if (!isScanResponse(payload)) {
+    throw new Error("Scan returned an invalid response");
+  }
+
+  return payload;
+}
+
+async function createTableRequest(payload: {
+  tableName: string;
+  columns: EditableColumn[];
+}): Promise<CreateTableResponse> {
+  const response = await fetch(`${env.VITE_SERVER_URL}/api/table/create`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const body: unknown = await response.json();
+
+  if (!response.ok || !isCreateTableResponse(body) || !body.success) {
+    const errorBody = body as ErrorResponse;
+    const issueMessage =
+      errorBody.data?.issues && errorBody.data.issues.length > 0
+        ? errorBody.data.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")
+        : null;
+
+    throw new Error(issueMessage ?? errorBody.message ?? "Table creation failed");
+  }
+
+  return body;
+}
+
 function RouteComponent() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [scanResult, setScanResult] = useState<ScanTable[]>([]);
   const [editableSchemas, setEditableSchemas] = useState<EditableColumn[][]>([]);
-  const [availableTypes, setAvailableTypes] = useState<DbColumnType[]>([...FALLBACK_COLUMN_TYPES]);
   const [selectedTableIndex, setSelectedTableIndex] = useState(0);
   const [tableName, setTableName] = useState("");
-  const [loading, setLoading] = useState<"idle" | "scanning" | "creating">("idle");
+
+  const scanMutation = useMutation({
+    mutationFn: scanTableRequest,
+    onSuccess: (payload) => {
+      setEditableSchemas(
+        payload.data.tables.map((table) =>
+          table.columns.map((column) => ({
+            name: column.name,
+            type: column.inferredType,
+          })),
+        ),
+      );
+      setSelectedTableIndex(0);
+
+      if (payload.data.tables.length > 0) {
+        toast.success(payload.message || "Table scan complete.");
+      } else {
+        toast.error(payload.message || "No table found in the uploaded image.");
+      }
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Scan failed");
+    },
+  });
+
+  const createTableMutation = useMutation({
+    mutationFn: createTableRequest,
+    onSuccess: (payload) => {
+      toast.success(payload.message || "Table created successfully.");
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Table creation failed");
+    },
+  });
 
   useEffect(() => {
     if (!selectedFile) {
@@ -80,73 +209,47 @@ function RouteComponent() {
     };
   }, [selectedFile]);
 
-  const currentColumns = useMemo(() => {
-    return editableSchemas[selectedTableIndex] ?? [];
-  }, [editableSchemas, selectedTableIndex]);
+  const scanResult = scanMutation.data?.data.tables ?? [];
+  const availableTypes =
+    scanMutation.data && scanMutation.data.data.columnTypes.length > 0
+      ? scanMutation.data.data.columnTypes
+      : [...FALLBACK_COLUMN_TYPES];
+  const activeTableIndex =
+    scanResult.length === 0 ? 0 : Math.min(selectedTableIndex, scanResult.length - 1);
 
-  const currentSampleColumns = useMemo(() => {
-    return scanResult[selectedTableIndex]?.columns ?? [];
-  }, [scanResult, selectedTableIndex]);
+  const currentColumns = editableSchemas[activeTableIndex] ?? [];
+  const currentSampleColumns = scanResult[activeTableIndex]?.columns ?? [];
+  const selectedTableLabel =
+    scanResult.length > 0 ? `Table ${activeTableIndex + 1}` : "Select table";
 
-  const onSelectFile = (event: ChangeEvent<HTMLInputElement>) => {
+  useEffect(() => {
+    if (selectedTableIndex >= scanResult.length && scanResult.length > 0) {
+      setSelectedTableIndex(0);
+    }
+  }, [scanResult.length, selectedTableIndex]);
+
+  function onSelectFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
     setSelectedFile(file);
-  };
+    scanMutation.reset();
+    createTableMutation.reset();
+    setEditableSchemas([]);
+    setSelectedTableIndex(0);
+  }
 
-  const scanTable = async () => {
+  async function scanTable() {
     if (!selectedFile) {
       toast.error("Please take or upload a photo first.");
       return;
     }
 
-    setLoading("scanning");
+    await scanMutation.mutateAsync(selectedFile);
+  }
 
-    try {
-      const formData = new FormData();
-      formData.append("file", selectedFile, selectedFile.name);
-
-      const response = await fetch(`${env.VITE_SERVER_URL}/api/table/scan`, {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
-
-      const payload = (await response.json()) as ScanResponse | { message?: string };
-
-      if (!response.ok) {
-        throw new Error(payload.message ?? "Scan failed");
-      }
-
-      const tables = (payload as ScanResponse).data.tables;
-      const columnTypes = (payload as ScanResponse).data.columnTypes;
-
-      setScanResult(tables);
-      setEditableSchemas(
-        tables.map((table) =>
-          table.columns.map((column) => ({
-            name: column.name,
-            type: column.inferredType,
-          })),
-        ),
-      );
-      setAvailableTypes(columnTypes.length > 0 ? columnTypes : [...FALLBACK_COLUMN_TYPES]);
-      setSelectedTableIndex(0);
-      if (tables.length > 0) {
-        toast.success("Table scan complete.");
-      } else {
-        toast.error("No table found in the uploaded image.");
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Scan failed");
-    } finally {
-      setLoading("idle");
-    }
-  };
-
-  const updateColumnName = (columnIndex: number, nextName: string) => {
+  function updateColumnName(columnIndex: number, nextName: string) {
     setEditableSchemas((previous) =>
       previous.map((tableColumns, tableIndex) => {
-        if (tableIndex !== selectedTableIndex) {
+        if (tableIndex !== activeTableIndex) {
           return tableColumns;
         }
         return tableColumns.map((column, index) =>
@@ -154,22 +257,26 @@ function RouteComponent() {
         );
       }),
     );
-  };
+  }
 
-  const updateColumnType = (columnIndex: number, nextType: string) => {
+  function updateColumnType(columnIndex: number, nextType: string | null) {
+    if (!isDbColumnType(nextType)) {
+      return;
+    }
+
     setEditableSchemas((previous) =>
       previous.map((tableColumns, tableIndex) => {
-        if (tableIndex !== selectedTableIndex) {
+        if (tableIndex !== activeTableIndex) {
           return tableColumns;
         }
         return tableColumns.map((column, index) =>
-          index === columnIndex ? { ...column, type: nextType as DbColumnType } : column,
+          index === columnIndex ? { ...column, type: nextType } : column,
         );
       }),
     );
-  };
+  }
 
-  const createTable = async () => {
+  async function createTable() {
     if (currentColumns.length === 0) {
       toast.error("No scanned columns to create a table from.");
       return;
@@ -180,34 +287,11 @@ function RouteComponent() {
       return;
     }
 
-    setLoading("creating");
-
-    try {
-      const response = await fetch(`${env.VITE_SERVER_URL}/api/table/create`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          tableName,
-          columns: currentColumns,
-        }),
-      });
-
-      const payload = (await response.json()) as { success: boolean; message: string };
-
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.message ?? "Table creation failed");
-      }
-
-      toast.success(payload.message ?? "Table created successfully.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Table creation failed");
-    } finally {
-      setLoading("idle");
-    }
-  };
+    await createTableMutation.mutateAsync({
+      tableName,
+      columns: currentColumns,
+    });
+  }
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-8 p-6">
@@ -244,8 +328,11 @@ function RouteComponent() {
           ) : null}
 
           <div>
-            <Button disabled={!selectedFile || loading !== "idle"} onClick={scanTable}>
-              {loading === "scanning" ? "Scanning..." : "Scan Table"}
+            <Button
+              disabled={!selectedFile || scanMutation.isPending || createTableMutation.isPending}
+              onClick={scanTable}
+            >
+              {scanMutation.isPending ? "Scanning..." : "Scan Table"}
             </Button>
           </div>
         </CardContent>
@@ -256,18 +343,18 @@ function RouteComponent() {
           <CardHeader>
             <CardTitle>Schema Editor</CardTitle>
             <CardDescription>
-              Edit OCR column names and types before creating the DB table.
+              Edit column names and types before creating the DB table.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
             <div className="flex flex-col gap-2">
               <Label>Detected Table</Label>
               <Select
-                value={String(selectedTableIndex)}
+                value={String(activeTableIndex)}
                 onValueChange={(value) => setSelectedTableIndex(Number(value))}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select table" />
+                  <SelectValue placeholder="Select table">{selectedTableLabel}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {scanResult.map((_, index) => (
@@ -283,7 +370,7 @@ function RouteComponent() {
               <Label htmlFor="table-name">Table Name</Label>
               <Input
                 id="table-name"
-                placeholder="example: scanned_invoice"
+                placeholder="example: scanned_table"
                 value={tableName}
                 onChange={(event) => setTableName(event.target.value)}
               />
@@ -307,7 +394,7 @@ function RouteComponent() {
                       onValueChange={(value) => updateColumnType(index, value)}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue />
+                        <SelectValue>{column.type}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {availableTypes.map((type) => (
@@ -331,10 +418,14 @@ function RouteComponent() {
 
             <div>
               <Button
-                disabled={loading !== "idle" || currentColumns.length === 0}
+                disabled={
+                  scanMutation.isPending ||
+                  createTableMutation.isPending ||
+                  currentColumns.length === 0
+                }
                 onClick={createTable}
               >
-                {loading === "creating" ? "Creating..." : "Create Table"}
+                {createTableMutation.isPending ? "Creating..." : "Create Table"}
               </Button>
             </div>
           </CardContent>

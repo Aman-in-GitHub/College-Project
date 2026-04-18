@@ -6,18 +6,9 @@ pre-commit:
       priority: 1
       run: pnpm format
       stage_fixed: true
-    ruff-format:
-      priority: 2
-      run: uvx ruff format .
-      root: "apps/fast-api"
-      stage_fixed: true
     lint:
       priority: 2
       run: pnpm lint
-    ruff-check:
-      priority: 3
-      run: uvx ruff check .
-      root: "apps/fast-api"
     stage:
-      priority: 4
+      priority: 3
       run: git add -A

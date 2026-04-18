@@ -145,27 +145,38 @@ export function normalizeIdentifier(value: string): string | null {
   return normalized;
 }
 
-export function quoteIdentifier(identifier: string): string {
-  return `"${identifier.replace(/"/g, '""')}"`;
+export function getIdentifierValidationMessage(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  if (!normalized) {
+    return "must contain letters, numbers, or underscores";
+  }
+
+  if (normalized.length > 63) {
+    return "must be 63 characters or fewer";
+  }
+
+  if (!/^[a-z_]/.test(normalized)) {
+    return "must start with a letter or underscore";
+  }
+
+  if (!/^[a-z_][a-z0-9_]*$/.test(normalized)) {
+    return "must use only letters, numbers, and underscores";
+  }
+
+  if (RESERVED_IDENTIFIERS.has(normalized)) {
+    return "uses a reserved SQL keyword";
+  }
+
+  return "is invalid";
 }
 
-export function mapFastApiType(pgType: string): (typeof DB_COLUMN_TYPES)[number] {
-  const normalized = pgType.trim().toUpperCase();
-
-  switch (normalized) {
-    case "INTEGER":
-      return "integer";
-    case "NUMERIC":
-      return "numeric";
-    case "BOOLEAN":
-      return "boolean";
-    case "DATE":
-      return "date";
-    case "TIME":
-      return "time";
-    case "TIMESTAMP":
-      return "timestamp";
-    default:
-      return "text";
-  }
+export function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`;
 }

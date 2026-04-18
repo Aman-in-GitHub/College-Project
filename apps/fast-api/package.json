@@ -1,7 +1,0 @@
-{
-  "name": "fast-api",
-  "private": true,
-  "scripts": {
-    "dev": ".venv/bin/python run.py"
-  }
-}

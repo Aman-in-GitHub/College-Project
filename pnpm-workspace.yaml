@@ -4,3 +4,4 @@ allowBuilds:
   esbuild: true
   lefthook: false
   msw: true
+  protobufjs: true
