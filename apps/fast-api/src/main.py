@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from functools import lru_cache
 from html.parser import HTMLParser
@@ -14,6 +15,9 @@ from paddleocr import TableRecognitionPipelineV2
 from PIL import Image, UnidentifiedImageError
 
 os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+
+logger = logging.getLogger("college_project.fastapi_service")
+logger.setLevel(logging.INFO)
 
 DB_COLUMN_TYPES = ("text", "integer", "numeric", "boolean", "date", "time", "timestamp")
 SUPPORTED_CONTENT_TYPES = {
@@ -67,6 +71,7 @@ app.add_middleware(
 
 @lru_cache(maxsize=1)
 def get_pipeline() -> TableRecognitionPipelineV2:
+    logger.info("Initializing table recognition pipeline")
     return TableRecognitionPipelineV2()
 
 
@@ -436,12 +441,22 @@ def extract_scanned_tables(file_bytes: bytes) -> list[dict[str, object]]:
 
 @app.post("/api/table/scan")
 async def scan_table(file: UploadFile = File(...)) -> dict[str, object]:
+    logger.info(
+        "Received table scan request filename=%s content_type=%s",
+        file.filename,
+        file.content_type,
+    )
     upload_suffix = Path(file.filename or "").suffix.lower()
 
     if (
         file.content_type not in SUPPORTED_CONTENT_TYPES
         and upload_suffix not in SUPPORTED_SUFFIXES
     ):
+        logger.warning(
+            "Rejected upload with unsupported type filename=%s content_type=%s",
+            file.filename,
+            file.content_type,
+        )
         raise HTTPException(
             status_code=400,
             detail="Unsupported file type. Use an image file such as jpg, jpeg, png, webp, tiff, or bmp.",
@@ -450,16 +465,27 @@ async def scan_table(file: UploadFile = File(...)) -> dict[str, object]:
     file_bytes = await file.read()
 
     if not file_bytes:
+        logger.warning("Rejected empty upload filename=%s", file.filename)
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
     try:
         tables = await run_in_threadpool(extract_scanned_tables, file_bytes)
     except ValueError as exc:
+        logger.warning(
+            "Invalid upload content filename=%s error=%s", file.filename, exc
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception(
+            "Table recognition failed filename=%s error=%s", file.filename, exc
+        )
         raise HTTPException(
             status_code=500, detail=f"Table recognition failed: {exc}"
         ) from exc
+
+    logger.info(
+        "Completed table scan filename=%s table_count=%s", file.filename, len(tables)
+    )
 
     return {
         "success": True,
