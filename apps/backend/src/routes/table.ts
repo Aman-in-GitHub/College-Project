@@ -54,6 +54,8 @@ type TableColumn = {
   isNullable: boolean;
 };
 
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 const SYSTEM_TABLE_COLUMN_NAMES = new Set([
   "id",
   "created_at",
@@ -211,27 +213,36 @@ async function ensureSystemTableColumns(params: {
   tableName: string;
   departmentId: string;
   createdByUserId: string | null;
+  tx?: DbTransaction;
 }): Promise<void> {
   const quotedTableName = quoteTableIdentifier(params.tableName);
   const departmentIdLiteral = toSqlLiteral(params.departmentId);
   const createdByUserIdLiteral = toSqlLiteral(params.createdByUserId);
+  const executeStatement = async (statement: string): Promise<void> => {
+    if (params.tx) {
+      await params.tx.execute(sql.raw(statement));
+      return;
+    }
 
-  await postgresClient.unsafe(
+    await postgresClient.unsafe(statement);
+  };
+
+  await executeStatement(
     `ALTER TABLE ${quotedTableName} ADD COLUMN IF NOT EXISTS ${quoteIdentifier("created_at")} TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
   );
-  await postgresClient.unsafe(
+  await executeStatement(
     `ALTER TABLE ${quotedTableName} ADD COLUMN IF NOT EXISTS ${quoteIdentifier("updated_at")} TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
   );
-  await postgresClient.unsafe(
+  await executeStatement(
     `ALTER TABLE ${quotedTableName} ADD COLUMN IF NOT EXISTS ${quoteIdentifier("department_id")} TEXT`,
   );
-  await postgresClient.unsafe(
+  await executeStatement(
     `ALTER TABLE ${quotedTableName} ADD COLUMN IF NOT EXISTS ${quoteIdentifier("created_by_user_id")} TEXT`,
   );
-  await postgresClient.unsafe(
+  await executeStatement(
     `UPDATE ${quotedTableName} SET ${quoteIdentifier("department_id")} = ${departmentIdLiteral} WHERE ${quoteIdentifier("department_id")} IS NULL`,
   );
-  await postgresClient.unsafe(
+  await executeStatement(
     `UPDATE ${quotedTableName} SET ${quoteIdentifier("created_by_user_id")} = ${createdByUserIdLiteral} WHERE ${quoteIdentifier("created_by_user_id")} IS NULL`,
   );
 }
@@ -1538,6 +1549,7 @@ tableRoutes.post("/api/table/create", requireDepartmentAdmin, async (c) => {
         tableName: normalizedTableName,
         departmentId: department.id,
         createdByUserId: user?.id ?? null,
+        tx,
       });
 
       if (parsed.data.fillData && rowsToInsert.length > 0) {

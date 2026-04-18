@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type ChangeEvent } from "react";
 
 import { ModeToggle } from "@/components/mode-toggle";
 import { Button } from "@/components/ui/button";
@@ -598,16 +598,43 @@ function RouteComponent() {
     };
   }, [selectedFile]);
 
+  const scrollPreviewIntoView = useEffectEvent(() => {
+    previewSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  });
+
+  const scrollSchemaEditorIntoView = useEffectEvent(() => {
+    schemaEditorRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  });
+
+  const scheduleSmoothScroll = useEffectEvent((scrollFn: () => void) => {
+    let firstAnimationFrameId = 0;
+    let secondAnimationFrameId = 0;
+
+    firstAnimationFrameId = window.requestAnimationFrame(() => {
+      secondAnimationFrameId = window.requestAnimationFrame(() => {
+        scrollFn();
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(firstAnimationFrameId);
+      window.cancelAnimationFrame(secondAnimationFrameId);
+    };
+  });
+
   useEffect(() => {
     if (!previewUrl) {
       return;
     }
 
-    previewSectionRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-  }, [previewUrl]);
+    return scheduleSmoothScroll(scrollPreviewIntoView);
+  }, [previewUrl, scheduleSmoothScroll, scrollPreviewIntoView]);
 
   const scanResult = scanMutation.data?.data.tables ?? [];
   const availableTypes =
@@ -631,12 +658,9 @@ function RouteComponent() {
 
   useEffect(() => {
     if (scanResult.length > 0) {
-      schemaEditorRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
+      return scheduleSmoothScroll(scrollSchemaEditorIntoView);
     }
-  }, [scanResult.length]);
+  }, [scanResult.length, scheduleSmoothScroll, scrollSchemaEditorIntoView]);
 
   function resetFormState() {
     scanRequestIdRef.current += 1;

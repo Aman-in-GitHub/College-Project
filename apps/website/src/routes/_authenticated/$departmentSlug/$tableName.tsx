@@ -541,6 +541,7 @@ function RouteComponent() {
   const importCameraInputRef = useRef<HTMLInputElement | null>(null);
   const importUploadInputRef = useRef<HTMLInputElement | null>(null);
   const importCsvInputRef = useRef<HTMLInputElement | null>(null);
+  const importPreviewRef = useRef<HTMLImageElement | null>(null);
   editedRowsRef.current = editedRows;
 
   useEffect(() => {
@@ -556,6 +557,37 @@ function RouteComponent() {
       URL.revokeObjectURL(objectUrl);
     };
   }, [selectedImportFile]);
+
+  const scrollImportPreviewIntoView = useEffectEvent(() => {
+    importPreviewRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  });
+
+  const scheduleSmoothScroll = useEffectEvent((scrollFn: () => void) => {
+    let firstAnimationFrameId = 0;
+    let secondAnimationFrameId = 0;
+
+    firstAnimationFrameId = window.requestAnimationFrame(() => {
+      secondAnimationFrameId = window.requestAnimationFrame(() => {
+        scrollFn();
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(firstAnimationFrameId);
+      window.cancelAnimationFrame(secondAnimationFrameId);
+    };
+  });
+
+  useEffect(() => {
+    if (!importPreviewUrl || !selectedImportFile?.type.startsWith("image/")) {
+      return;
+    }
+
+    return scheduleSmoothScroll(scrollImportPreviewIntoView);
+  }, [importPreviewUrl, scheduleSmoothScroll, scrollImportPreviewIntoView, selectedImportFile]);
 
   const tableQuery = useQuery({
     queryKey: [...tableQueryKey, debouncedSearchTerm, pagination.pageIndex, pagination.pageSize],
@@ -1069,6 +1101,7 @@ function RouteComponent() {
                   {importPreviewUrl && selectedImportFile?.type.startsWith("image/") ? (
                     <motion.img
                       key="import-preview"
+                      ref={importPreviewRef}
                       src={importPreviewUrl}
                       alt="Selected rows import preview"
                       className="max-h-80 w-full object-contain"
