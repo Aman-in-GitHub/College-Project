@@ -171,16 +171,20 @@ type DepartmentTablesResponse = {
 };
 
 function toScanRows(columns: EditableColumn[], sampleColumns: ScannedColumn[]): string[][] {
-  const selectedColumns = columns
-    .map((column) => sampleColumns[column.sourceIndex] ?? null)
-    .filter((column): column is ScannedColumn => column !== null);
-  const rowCount = selectedColumns.reduce(
-    (maxCount, column) => Math.max(maxCount, column.values.length),
-    0,
-  );
+  const rowCount = columns.reduce((maxCount, column) => {
+    const sampleColumn = sampleColumns[column.sourceIndex];
+
+    return Math.max(maxCount, sampleColumn?.values.length ?? 0);
+  }, 0);
 
   return Array.from({ length: rowCount }, (_, rowIndex) =>
-    selectedColumns.map((column) => column.values[rowIndex] ?? ""),
+    columns.map((column) => {
+      if (column.sourceIndex < 0) {
+        return "";
+      }
+
+      return sampleColumns[column.sourceIndex]?.values[rowIndex] ?? "";
+    }),
   );
 }
 
@@ -512,6 +516,8 @@ function RouteComponent() {
   const [tableName, setTableName] = useState("");
   const [isFillDataEnabled, setIsFillDataEnabled] = useState(true);
   const [activeScanSource, setActiveScanSource] = useState<ScanSource | null>(null);
+  const [customColumnName, setCustomColumnName] = useState("");
+  const [customColumnType, setCustomColumnType] = useState<DbColumnType>("text");
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const schemaEditorRef = useRef<HTMLDivElement | null>(null);
@@ -704,6 +710,8 @@ function RouteComponent() {
     setTableName("");
     setIsFillDataEnabled(true);
     setActiveScanSource(null);
+    setCustomColumnName("");
+    setCustomColumnType("text");
     scanMutation.reset();
     createTableMutation.reset();
   }
@@ -816,6 +824,35 @@ function RouteComponent() {
         return tableColumns.filter((_, index) => index !== columnIndex);
       }),
     );
+  }
+
+  function addCustomColumn() {
+    const trimmedName = customColumnName.trim();
+
+    if (!trimmedName) {
+      showWarningToast("Please provide a custom column name.");
+      return;
+    }
+
+    setEditableSchemas((previous) =>
+      previous.map((tableColumns, tableIndex) => {
+        if (tableIndex !== activeTableIndex) {
+          return tableColumns;
+        }
+
+        return [
+          ...tableColumns,
+          {
+            name: trimmedName,
+            type: customColumnType,
+            isRequired: false,
+            sourceIndex: -1,
+          },
+        ];
+      }),
+    );
+    setCustomColumnName("");
+    setCustomColumnType("text");
   }
 
   async function createTable() {
@@ -1249,6 +1286,48 @@ function RouteComponent() {
                           ))}
                         </TableBody>
                       </Table>
+                    </div>
+
+                    <div className="flex flex-col gap-3 rounded border p-4 lg:flex-row lg:items-end">
+                      <div className="flex flex-1 flex-col gap-2">
+                        <Input
+                          id="custom-column-name"
+                          placeholder="example: remarks"
+                          value={customColumnName}
+                          onChange={(event) => setCustomColumnName(event.target.value)}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2 lg:w-56">
+                        <Select
+                          items={availableTypeOptions}
+                          value={customColumnType}
+                          onValueChange={(value) => {
+                            if (isDbColumnType(value)) {
+                              setCustomColumnType(value);
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableTypeOptions.map((option) => (
+                              <SelectItem key={`custom-${option.value}`} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full lg:w-auto"
+                        onClick={addCustomColumn}
+                      >
+                        <PlusIcon className="mb-1 size-4" weight="bold" />
+                        Add Column
+                      </Button>
                     </div>
 
                     <div className="flex flex-col gap-3">
