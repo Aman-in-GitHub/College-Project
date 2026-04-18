@@ -1,3 +1,4 @@
+import { LockKeyOpenIcon, SignInIcon } from "@phosphor-icons/react";
 import { useForm } from "@tanstack/react-form";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
@@ -90,7 +91,10 @@ function RouteComponent() {
                     className="flex flex-col items-center gap-2 text-center"
                     {...getEnterAnimationProps(isReducedMotion, 0.12)}
                   >
-                    <h1 className="text-2xl font-bold">Welcome back</h1>
+                    <h1 className="flex items-center gap-2 text-2xl font-bold">
+                      <LockKeyOpenIcon className="size-6 text-primary" weight="duotone" />
+                      Welcome back
+                    </h1>
                     <p className="text-balance text-muted-foreground">Login to your account</p>
                   </motion.div>
 
@@ -161,6 +165,7 @@ function RouteComponent() {
                     {([canSubmit, isSubmitting]) => (
                       <Field>
                         <Button type="submit" disabled={!canSubmit}>
+                          <SignInIcon className="size-4" weight="bold" />
                           {isSubmitting ? "Logging in..." : "Login"}
                         </Button>
                       </Field>

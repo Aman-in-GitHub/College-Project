@@ -1,3 +1,13 @@
+import {
+  CameraIcon,
+  EraserIcon,
+  HouseLineIcon,
+  MagnifyingGlassIcon,
+  PlusIcon,
+  SignOutIcon,
+  TableIcon,
+  UsersThreeIcon,
+} from "@phosphor-icons/react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -797,7 +807,8 @@ function RouteComponent() {
         {...getEnterAnimationProps(isReducedMotion, 0.03)}
       >
         <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold">
+          <h1 className="flex items-center gap-2 text-xl font-semibold">
+            <HouseLineIcon className="size-5 text-primary" weight="duotone" />
             {isSystemAdmin
               ? "Department Admins"
               : isDepartmentAdmin
@@ -820,6 +831,7 @@ function RouteComponent() {
         <div className="flex flex-col gap-3 sm:flex-row">
           {(isSystemAdmin || isDepartmentAdmin) && (
             <Link to="/create" className={buttonVariants({ className: "w-full sm:w-auto" })}>
+              <PlusIcon className="size-4" weight="bold" />
               Create New
             </Link>
           )}
@@ -829,6 +841,7 @@ function RouteComponent() {
             disabled={signOutMutation.isPending}
             onClick={() => void signOutMutation.mutateAsync()}
           >
+            <SignOutIcon className="size-4" weight="bold" />
             {signOutMutation.isPending ? "Logging out..." : "Logout"}
           </Button>
           <div className="flex w-full sm:w-auto">
@@ -841,7 +854,10 @@ function RouteComponent() {
         <motion.div {...getEnterAnimationProps(isReducedMotion, 0.06, 14)}>
           <Card>
             <CardHeader>
-              <CardTitle>{isSystemAdmin ? "Created Department Admins" : "Created Staff"}</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <UsersThreeIcon className="size-5 text-primary" weight="duotone" />
+                {isSystemAdmin ? "Created Department Admins" : "Created Staff"}
+              </CardTitle>
               <CardDescription>
                 {isSystemAdmin
                   ? "Department admins created from this account are listed here."
@@ -914,7 +930,10 @@ function RouteComponent() {
         <motion.div {...getEnterAnimationProps(isReducedMotion, 0.09, 14)}>
           <Card>
             <CardHeader>
-              <CardTitle>Tables</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <TableIcon className="size-5 text-primary" weight="duotone" />
+                Tables
+              </CardTitle>
               <CardDescription>Open digitized tables for {department.name}.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -960,7 +979,10 @@ function RouteComponent() {
           <motion.div {...getEnterAnimationProps(isReducedMotion, 0.12, 14)}>
             <Card>
               <CardHeader>
-                <CardTitle>Photo Input</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <CameraIcon className="size-5 text-primary" weight="duotone" />
+                  Photo Input
+                </CardTitle>
                 <CardDescription>Choose one method: camera or upload.</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
@@ -1015,6 +1037,7 @@ function RouteComponent() {
                     }
                     onClick={scanTable}
                   >
+                    <MagnifyingGlassIcon className="size-4" weight="bold" />
                     {scanMutation.isPending ? "Scanning..." : "Scan Table"}
                   </Button>
                   <Button
@@ -1024,6 +1047,7 @@ function RouteComponent() {
                     disabled={!selectedFile && scanResult.length === 0 && !previewUrl}
                     onClick={clearSelection}
                   >
+                    <EraserIcon className="size-4" weight="bold" />
                     Clear
                   </Button>
                 </div>
@@ -1040,7 +1064,10 @@ function RouteComponent() {
               >
                 <Card>
                   <CardHeader>
-                    <CardTitle>Schema Editor</CardTitle>
+                    <CardTitle className="flex items-center gap-2">
+                      <TableIcon className="size-5 text-primary" weight="duotone" />
+                      Schema Editor
+                    </CardTitle>
                     <CardDescription>
                       Edit column names and types before creating the DB table.
                     </CardDescription>
@@ -1151,6 +1178,7 @@ function RouteComponent() {
                         }
                         onClick={createTable}
                       >
+                        <PlusIcon className="size-4" weight="bold" />
                         {createTableMutation.isPending ? "Creating..." : "Create Table"}
                       </Button>
                     </div>

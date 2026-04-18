@@ -1,3 +1,12 @@
+import {
+  ArrowLeftIcon,
+  BuildingsIcon,
+  EraserIcon,
+  IdentificationCardIcon,
+  ShieldCheckIcon,
+  UserPlusIcon,
+  UsersThreeIcon,
+} from "@phosphor-icons/react";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import { Link, createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router";
@@ -91,6 +100,7 @@ function CreateFormActions(props: {
           className="w-full sm:w-auto"
           disabled={!props.canSubmit || props.isPending}
         >
+          <UserPlusIcon className="size-4" weight="bold" />
           {props.isPending ? "Creating..." : props.submitLabel}
         </Button>
         <Button
@@ -100,6 +110,7 @@ function CreateFormActions(props: {
           disabled={props.isPending}
           onClick={props.onClear}
         >
+          <EraserIcon className="size-4" weight="bold" />
           Clear
         </Button>
       </div>
@@ -169,12 +180,16 @@ function RouteComponent() {
         {...getEnterAnimationProps(isReducedMotion, 0.04)}
       >
         <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold">Create Access</h1>
+          <h1 className="flex items-center gap-2 text-xl font-semibold">
+            <UserPlusIcon className="size-5 text-primary" weight="duotone" />
+            Create Access
+          </h1>
           <p className="text-sm text-muted-foreground">
             This account does not have permission to create users.
           </p>
         </div>
         <Link to="/" className={buttonVariants({ variant: "default" })}>
+          <ArrowLeftIcon className="size-4" weight="bold" />
           Back
         </Link>
       </motion.div>
@@ -230,12 +245,16 @@ function CreateDepartmentAdminForm() {
         {...getEnterAnimationProps(isReducedMotion, 0.04)}
       >
         <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold">Create Department Admin</h1>
+          <h1 className="flex items-center gap-2 text-xl font-semibold">
+            <BuildingsIcon className="size-5 text-primary" weight="duotone" />
+            Create Department Admin
+          </h1>
           <p className="text-sm text-muted-foreground">
             Create a department and its admin account in one step.
           </p>
         </div>
         <Link to="/" className={buttonVariants({ variant: "default" })}>
+          <ArrowLeftIcon className="size-4" weight="bold" />
           Back
         </Link>
       </motion.div>
@@ -243,7 +262,10 @@ function CreateDepartmentAdminForm() {
       <motion.div {...getEnterAnimationProps(isReducedMotion, 0.08, 16)}>
         <Card>
           <CardHeader>
-            <CardTitle>Department Admin Details</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <ShieldCheckIcon className="size-5 text-primary" weight="duotone" />
+              Department Admin Details
+            </CardTitle>
             <CardDescription>
               Fill in the department details and the admin login details.
             </CardDescription>
@@ -447,12 +469,16 @@ function CreateStaffForm({ departmentName }: { departmentName: string }) {
         {...getEnterAnimationProps(isReducedMotion, 0.04)}
       >
         <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold">Create Staff</h1>
+          <h1 className="flex items-center gap-2 text-xl font-semibold">
+            <UsersThreeIcon className="size-5 text-primary" weight="duotone" />
+            Create Staff
+          </h1>
           <p className="text-sm text-muted-foreground">
             Create a staff account for {departmentName}.
           </p>
         </div>
         <Link to="/" className={buttonVariants({ variant: "default" })}>
+          <ArrowLeftIcon className="size-4" weight="bold" />
           Back
         </Link>
       </motion.div>
@@ -460,7 +486,10 @@ function CreateStaffForm({ departmentName }: { departmentName: string }) {
       <motion.div {...getEnterAnimationProps(isReducedMotion, 0.08, 16)}>
         <Card>
           <CardHeader>
-            <CardTitle>Staff Details</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <IdentificationCardIcon className="size-5 text-primary" weight="duotone" />
+              Staff Details
+            </CardTitle>
             <CardDescription>Staff accounts have view-only access.</CardDescription>
           </CardHeader>
           <CardContent>

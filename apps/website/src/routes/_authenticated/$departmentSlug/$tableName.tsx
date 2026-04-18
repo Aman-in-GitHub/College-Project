@@ -1,3 +1,14 @@
+import {
+  ArrowLeftIcon,
+  CameraIcon,
+  DownloadSimpleIcon,
+  EraserIcon,
+  FileCsvIcon,
+  MagnifyingGlassIcon,
+  PlusIcon,
+  TableIcon,
+  UploadSimpleIcon,
+} from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, getRouteApi } from "@tanstack/react-router";
 import {
@@ -1026,13 +1037,17 @@ function RouteComponent() {
         {...getEnterAnimationProps(isReducedMotion, 0.03)}
       >
         <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold">{params.tableName}</h1>
+          <h1 className="flex items-center gap-2 text-xl font-semibold">
+            <TableIcon className="size-5 text-primary" weight="duotone" />
+            {params.tableName}
+          </h1>
           <p className="text-sm text-muted-foreground">
             {params.departmentSlug}
             {canEdit ? " · editable" : " · view only"}
           </p>
         </div>
         <Link to="/" className={buttonVariants({ variant: "default" })}>
+          <ArrowLeftIcon className="size-4" weight="bold" />
           Back
         </Link>
       </motion.div>
@@ -1040,7 +1055,10 @@ function RouteComponent() {
       <motion.div {...getEnterAnimationProps(isReducedMotion, 0.06, 14)}>
         <Card>
           <CardHeader>
-            <CardTitle>Table Data</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <TableIcon className="size-5 text-primary" weight="duotone" />
+              Table Data
+            </CardTitle>
             <CardDescription>
               {canEdit
                 ? "Department admins can add and update row values directly in the table."
@@ -1060,6 +1078,9 @@ function RouteComponent() {
                 <div className="grid gap-4 md:grid-cols-3">
                   <div className="flex flex-col gap-2">
                     <label htmlFor="table-import-camera" className="text-sm font-medium">
+                      <span className="mr-2 inline-flex align-middle">
+                        <CameraIcon className="size-4 text-primary" weight="duotone" />
+                      </span>
                       Take Photo
                     </label>
                     <Input
@@ -1073,6 +1094,9 @@ function RouteComponent() {
                   </div>
                   <div className="flex flex-col gap-2">
                     <label htmlFor="table-import-upload" className="text-sm font-medium">
+                      <span className="mr-2 inline-flex align-middle">
+                        <UploadSimpleIcon className="size-4 text-primary" weight="duotone" />
+                      </span>
                       Upload Photo
                     </label>
                     <Input
@@ -1085,6 +1109,9 @@ function RouteComponent() {
                   </div>
                   <div className="flex flex-col gap-2">
                     <label htmlFor="table-import-csv" className="text-sm font-medium">
+                      <span className="mr-2 inline-flex align-middle">
+                        <FileCsvIcon className="size-4 text-primary" weight="duotone" />
+                      </span>
                       Upload CSV
                     </label>
                     <Input
@@ -1121,6 +1148,7 @@ function RouteComponent() {
                     }
                     onClick={handleImportRows}
                   >
+                    <UploadSimpleIcon className="size-4" weight="bold" />
                     {importRowsMutation.isPending || importCsvMutation.isPending
                       ? "Importing..."
                       : "Import Rows"}
@@ -1132,6 +1160,7 @@ function RouteComponent() {
                     disabled={!selectedImportFile && !importPreviewUrl}
                     onClick={handleClearImportSelection}
                   >
+                    <EraserIcon className="size-4" weight="bold" />
                     Clear
                   </Button>
                 </div>
@@ -1140,6 +1169,9 @@ function RouteComponent() {
 
             <div className="flex flex-col gap-2">
               <label htmlFor="table-search" className="text-sm font-medium">
+                <span className="mr-2 inline-flex align-middle">
+                  <MagnifyingGlassIcon className="size-4 text-primary" weight="duotone" />
+                </span>
                 Search
               </label>
               <Input
@@ -1216,6 +1248,7 @@ function RouteComponent() {
                             disabled={!canAddRow || addRowMutation.isPending}
                             onClick={handleAddRow}
                           >
+                            <PlusIcon className="size-4" weight="bold" />
                             {addRowMutation.isPending ? "Adding..." : "Add"}
                           </Button>
                         </TableCell>
@@ -1254,6 +1287,7 @@ function RouteComponent() {
                       disabled={rows.length === 0 || tableQuery.isLoading}
                       onClick={handleExportCurrentPage}
                     >
+                      <DownloadSimpleIcon className="size-4" weight="bold" />
                       Export Current Page
                     </Button>
                     <Button
@@ -1263,6 +1297,7 @@ function RouteComponent() {
                       disabled={tableQuery.isLoading || isExportingAll}
                       onClick={() => void handleExportAll()}
                     >
+                      <DownloadSimpleIcon className="size-4" weight="bold" />
                       {isExportingAll ? "Exporting..." : "Export Full Table"}
                     </Button>
                   </div>
