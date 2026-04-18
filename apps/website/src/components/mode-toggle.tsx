@@ -11,7 +11,7 @@ function ModeToggle() {
     <Button
       type="button"
       variant="outline"
-      size="icon"
+      className="w-full md:w-12"
       aria-label="Toggle theme"
       onClick={() => setTheme(isDarkMode ? "light" : "dark")}
     >

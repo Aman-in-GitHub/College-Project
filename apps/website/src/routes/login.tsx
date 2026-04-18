@@ -69,7 +69,7 @@ function RouteComponent() {
 
   return (
     <motion.main
-      className="flex min-h-svh flex-col items-center justify-center"
+      className="-mt-32 flex min-h-svh flex-col items-center justify-center"
       {...getEnterAnimationProps(isReducedMotion, 0)}
     >
       <div className="flex w-full max-w-7xl flex-col gap-2">

@@ -475,7 +475,7 @@ function RouteComponent() {
   const [editableSchemas, setEditableSchemas] = useState<EditableColumn[][]>([]);
   const [selectedTableIndex, setSelectedTableIndex] = useState(0);
   const [tableName, setTableName] = useState("");
-  const [isFillDataEnabled, setIsFillDataEnabled] = useState(false);
+  const [isFillDataEnabled, setIsFillDataEnabled] = useState(true);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const schemaEditorRef = useRef<HTMLDivElement | null>(null);
@@ -645,7 +645,7 @@ function RouteComponent() {
     setEditableSchemas([]);
     setSelectedTableIndex(0);
     setTableName("");
-    setIsFillDataEnabled(false);
+    setIsFillDataEnabled(true);
     scanMutation.reset();
     createTableMutation.reset();
   }

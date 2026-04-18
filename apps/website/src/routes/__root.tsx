@@ -41,6 +41,9 @@ function RootLayout() {
       <HeadContent />
       <ProgressProvider color="#432dd7" height="4px">
         <NavigationProgress />
+        <div className="flex items-center justify-center">
+          <img src="/favicon.svg" alt="College Project Logo" className="size-32" />
+        </div>
         <Outlet />
         <Toaster position="top-center" duration={5000} visibleToasts={3} richColors={true} />
       </ProgressProvider>
