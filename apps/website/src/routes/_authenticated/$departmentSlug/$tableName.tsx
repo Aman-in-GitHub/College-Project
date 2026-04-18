@@ -717,6 +717,14 @@ function RouteComponent() {
   const canAddRow = editableColumns.some(
     (column) => (newRowValues[column.columnName] ?? "").trim().length > 0,
   );
+  const exportFormatOptions = EXPORT_FILE_FORMATS.map((format) => ({
+    value: format,
+    label: format.toUpperCase(),
+  }));
+  const pageSizeOptions = [10, 20, 50].map((pageSize) => ({
+    value: String(pageSize),
+    label: `${pageSize} / page`,
+  }));
 
   const handleDraftChange = useEffectEvent(
     (rowId: string, columnName: string, nextValue: string, originalValue: TableValue) => {
@@ -998,7 +1006,7 @@ function RouteComponent() {
         ]
       : [];
 
-    return [...dataColumns, ...actionColumns];
+    return [...actionColumns, ...dataColumns];
   }, [
     canEdit,
     deleteRowMutation.isPending,
@@ -1220,6 +1228,17 @@ function RouteComponent() {
                     )}
                     {canEdit ? (
                       <TableRow>
+                        <TableCell>
+                          <Button
+                            size="sm"
+                            className="w-20"
+                            disabled={!canAddRow || addRowMutation.isPending}
+                            onClick={handleAddRow}
+                          >
+                            <PlusIcon className="mb-1 size-4" weight="bold" />
+                            {addRowMutation.isPending ? "Adding..." : "Add"}
+                          </Button>
+                        </TableCell>
                         {tableColumns.map((column) => (
                           <TableCell key={`new-row-${column.columnName}`}>
                             {column.columnName === "id" ? (
@@ -1235,17 +1254,6 @@ function RouteComponent() {
                             )}
                           </TableCell>
                         ))}
-                        <TableCell>
-                          <Button
-                            size="sm"
-                            className="w-20"
-                            disabled={!canAddRow || addRowMutation.isPending}
-                            onClick={handleAddRow}
-                          >
-                            <PlusIcon className="mb-1 size-4" weight="bold" />
-                            {addRowMutation.isPending ? "Adding..." : "Add"}
-                          </Button>
-                        </TableCell>
                       </TableRow>
                     ) : null}
                   </TableBody>
@@ -1255,6 +1263,7 @@ function RouteComponent() {
                   <div className="grid gap-3 lg:flex lg:items-center lg:gap-3">
                     <div className="w-full lg:w-[140px]">
                       <Select
+                        items={exportFormatOptions}
                         value={exportFormat}
                         onValueChange={(value) => {
                           if (isExportFileFormat(value)) {
@@ -1266,9 +1275,9 @@ function RouteComponent() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {EXPORT_FILE_FORMATS.map((format) => (
-                            <SelectItem key={format} value={format}>
-                              {format.toUpperCase()}
+                          {exportFormatOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -1301,6 +1310,7 @@ function RouteComponent() {
                       {`${totalRows} total row(s)`}
                     </div>
                     <Select
+                      items={pageSizeOptions}
                       value={String(pagination.pageSize)}
                       onValueChange={(value) =>
                         setPagination({
@@ -1313,9 +1323,9 @@ function RouteComponent() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {[10, 20, 50].map((pageSize) => (
-                          <SelectItem key={pageSize} value={String(pageSize)}>
-                            {pageSize} / page
+                        {pageSizeOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
                           </SelectItem>
                         ))}
                       </SelectContent>

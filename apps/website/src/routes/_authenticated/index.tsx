@@ -11,7 +11,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useEffectEvent, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import { ModeToggle } from "@/components/mode-toggle";
 import { Button } from "@/components/ui/button";
@@ -608,37 +608,22 @@ function RouteComponent() {
     };
   }, [selectedFile]);
 
-  const scrollPreviewIntoView = useEffectEvent(() => {
-    previewSectionRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-  });
-
-  const scrollSchemaEditorIntoView = useEffectEvent(() => {
-    schemaEditorRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-  });
-
-  const scheduleSmoothScroll = useEffectEvent((scrollFn: () => void) => {
-    const timeoutId = window.setTimeout(() => {
-      scrollFn();
-    }, SCROLL_DELAY_MS);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  });
-
   useEffect(() => {
     if (!previewUrl) {
       return;
     }
 
-    return scheduleSmoothScroll(scrollPreviewIntoView);
-  }, [previewUrl, scheduleSmoothScroll, scrollPreviewIntoView]);
+    const timeoutId = window.setTimeout(() => {
+      previewSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, SCROLL_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [previewUrl]);
 
   const scanResult = scanMutation.data?.data.tables ?? [];
   const availableTypes =
@@ -651,8 +636,14 @@ function RouteComponent() {
   const currentColumns = editableSchemas[activeTableIndex] ?? [];
   const currentSampleColumns = scanResult[activeTableIndex]?.columns ?? [];
   const currentRows = toScanRows(currentSampleColumns);
-  const selectedTableLabel =
-    scanResult.length > 0 ? `Table ${activeTableIndex + 1}` : "Select table";
+  const detectedTableOptions = scanResult.map((_, index) => ({
+    value: String(index),
+    label: `Table ${index + 1}`,
+  }));
+  const availableTypeOptions = availableTypes.map((type) => ({
+    value: type,
+    label: type,
+  }));
 
   useEffect(() => {
     if (selectedTableIndex >= scanResult.length && scanResult.length > 0) {
@@ -662,9 +653,18 @@ function RouteComponent() {
 
   useEffect(() => {
     if (scanResult.length > 0) {
-      return scheduleSmoothScroll(scrollSchemaEditorIntoView);
+      const timeoutId = window.setTimeout(() => {
+        schemaEditorRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, SCROLL_DELAY_MS);
+
+      return () => {
+        window.clearTimeout(timeoutId);
+      };
     }
-  }, [scanResult.length, scheduleSmoothScroll, scrollSchemaEditorIntoView]);
+  }, [scanResult.length]);
 
   function resetFormState() {
     scanRequestIdRef.current += 1;
@@ -1070,16 +1070,17 @@ function RouteComponent() {
                     <div className="flex flex-col gap-2">
                       <Label>Detected Table</Label>
                       <Select
+                        items={detectedTableOptions}
                         value={String(activeTableIndex)}
                         onValueChange={(value) => setSelectedTableIndex(Number(value))}
                       >
                         <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select table">{selectedTableLabel}</SelectValue>
+                          <SelectValue placeholder="Select table" />
                         </SelectTrigger>
                         <SelectContent>
-                          {scanResult.map((_, index) => (
-                            <SelectItem key={`table-${index}`} value={String(index)}>
-                              Table {index + 1}
+                          {detectedTableOptions.map((option) => (
+                            <SelectItem key={`table-${option.value}`} value={option.value}>
+                              {option.label}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -1127,16 +1128,20 @@ function RouteComponent() {
                               </TableCell>
                               <TableCell>
                                 <Select
+                                  items={availableTypeOptions}
                                   value={column.type}
                                   onValueChange={(value) => updateColumnType(index, value)}
                                 >
                                   <SelectTrigger className="w-full">
-                                    <SelectValue>{column.type}</SelectValue>
+                                    <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    {availableTypes.map((type) => (
-                                      <SelectItem key={`${index}-${type}`} value={type}>
-                                        {type}
+                                    {availableTypeOptions.map((option) => (
+                                      <SelectItem
+                                        key={`${index}-${option.value}`}
+                                        value={option.value}
+                                      >
+                                        {option.label}
                                       </SelectItem>
                                     ))}
                                   </SelectContent>

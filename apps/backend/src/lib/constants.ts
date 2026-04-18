@@ -5,7 +5,7 @@ export const GLOBAL_RATE_LIMIT_WINDOW = 60_000;
 // Redis prefix for stored rate-limit counters.
 export const REDIS_RATE_LIMIT_PREFIX = "college_project_rate_limit:";
 // The model to use for table scanning with Gemini.
-export const GEMINI_TABLE_SCAN_MODEL = "gemini-3-flash-preview";
+export const GEMINI_TABLE_SCAN_MODEL = "gemini-2.5-flash";
 
 export const DB_COLUMN_TYPES = [
   "text",
