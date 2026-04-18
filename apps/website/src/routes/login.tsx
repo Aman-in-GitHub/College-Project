@@ -173,14 +173,6 @@ function RouteComponent() {
                       </Field>
                     )}
                   </form.Subscribe>
-
-                  <FieldSeparator className="*:data-[slot=field-separator-content]:bg-card">
-                    Or
-                  </FieldSeparator>
-
-                  <FieldDescription className="text-center">
-                    Don&apos;t have an account? <a href="#">Sign up</a>
-                  </FieldDescription>
                 </FieldGroup>
               </motion.form>
 
@@ -191,7 +183,7 @@ function RouteComponent() {
                 <img
                   src="/login.svg"
                   alt="Login illustration"
-                  className="absolute inset-0 h-full w-full object-contain dark:brightness-[0.2] dark:grayscale"
+                  className="absolute inset-0 h-full w-full object-contain"
                 />
               </motion.div>
             </CardContent>
