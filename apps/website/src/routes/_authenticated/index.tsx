@@ -1000,7 +1000,7 @@ function RouteComponent() {
       </motion.div>
 
       {(isSystemAdmin || isDepartmentAdmin || canLoadDepartmentTables) && (
-        <div className="grid gap-6 xl:grid-cols-2">
+        <div className="grid gap-6">
           {(isSystemAdmin || isDepartmentAdmin) && (
             <motion.div {...getEnterAnimationProps(isReducedMotion, 0.06, 14)}>
               <Card className="h-full">
@@ -1515,20 +1515,6 @@ function RouteComponent() {
             ) : null}
           </AnimatePresence>
         </>
-      ) : null}
-
-      {accessContext.role === "department_staff" ? (
-        <motion.div {...getEnterAnimationProps(isReducedMotion, 0.12, 12)}>
-          <Card>
-            <CardHeader>
-              <CardTitle>View Only</CardTitle>
-              <CardDescription>
-                Department staff can open tables and view department data but cannot create staff,
-                scan tables, or create tables.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        </motion.div>
       ) : null}
 
       {accessContext.role === "unassigned" ? (
