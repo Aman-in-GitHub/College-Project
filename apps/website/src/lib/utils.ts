@@ -46,19 +46,6 @@ export function getExitAnimationProps(isReducedMotion: boolean, distance = 8) {
   };
 }
 
-export function getHoverLiftProps(isReducedMotion: boolean) {
-  return isReducedMotion
-    ? {}
-    : {
-        whileHover: {
-          y: -2,
-        },
-        transition: {
-          duration: 0.18,
-        },
-      };
-}
-
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }

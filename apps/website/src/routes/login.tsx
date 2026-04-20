@@ -175,13 +175,13 @@ function RouteComponent() {
               </motion.form>
 
               <motion.div
-                className="relative hidden bg-muted md:block"
+                className="relative hidden bg-primary/10 md:block"
                 {...getEnterAnimationProps(isReducedMotion, 0.14, 20)}
               >
                 <img
-                  src="/login.svg"
-                  alt="Login illustration"
-                  className="absolute inset-0 h-full w-full object-contain"
+                  src="/login.gif"
+                  alt="Login gif"
+                  className="absolute inset-0 h-full w-full object-cover"
                 />
               </motion.div>
             </CardContent>

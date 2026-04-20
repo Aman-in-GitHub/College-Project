@@ -45,7 +45,6 @@ import {
   fetchApiJson,
   getEnterAnimationProps,
   getExitAnimationProps,
-  getHoverLiftProps,
   isRecord,
   showErrorToast,
   showInfoToast,
@@ -1039,7 +1038,11 @@ function RouteComponent() {
                               {item.department.name} ({item.department.slug})
                             </p>
                           ) : null}
-                          {item.user.isBanned ? <p className="text-destructive">Banned</p> : null}
+                          {item.user.isBanned ? (
+                            <p className="text-destructive">Banned</p>
+                          ) : (
+                            <p className="text-primary">Active</p>
+                          )}
                         </div>
                         <div className="flex flex-col gap-3 sm:items-end">
                           <div className="text-sm text-muted-foreground">
@@ -1105,7 +1108,6 @@ function RouteComponent() {
                       <motion.div
                         key={table.fullTableName}
                         {...getEnterAnimationProps(isReducedMotion, index * 0.03, 8)}
-                        {...getHoverLiftProps(isReducedMotion)}
                       >
                         <Link
                           to="/$departmentSlug/$tableName"
@@ -1277,80 +1279,78 @@ function RouteComponent() {
                       />
                     </div>
 
-                    <div className="overflow-x-auto border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-24">Delete</TableHead>
-                            <TableHead className="w-24">Required</TableHead>
-                            <TableHead className="min-w-48">Column Name</TableHead>
-                            <TableHead className="w-56">Data Type</TableHead>
-                            <TableHead className="min-w-56">Sample Values</TableHead>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-24">Delete</TableHead>
+                          <TableHead className="w-24">Required</TableHead>
+                          <TableHead className="min-w-48">Column Name</TableHead>
+                          <TableHead className="w-56">Data Type</TableHead>
+                          <TableHead className="min-w-56">Sample Values</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {currentColumns.map((column, index) => (
+                          <TableRow key={`column-${index}`}>
+                            <TableCell>
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="sm"
+                                disabled={currentColumns.length <= 1}
+                                onClick={() => deleteColumn(index)}
+                              >
+                                <TrashIcon className="mb-0.5 size-4" weight="bold" />
+                              </Button>
+                            </TableCell>
+                            <TableCell>
+                              <Checkbox
+                                id={`column-required-${index}`}
+                                checked={column.isRequired}
+                                onCheckedChange={(checked) =>
+                                  updateColumnRequired(index, checked === true)
+                                }
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                id={`column-name-${index}`}
+                                value={column.name}
+                                onChange={(event) => updateColumnName(index, event.target.value)}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Select
+                                items={availableTypeOptions}
+                                value={column.type}
+                                onValueChange={(value) => updateColumnType(index, value)}
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {availableTypeOptions.map((option) => (
+                                    <SelectItem
+                                      key={`${index}-${option.value}`}
+                                      value={option.value}
+                                    >
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {formatSampleValues(
+                                currentSampleColumns[column.sourceIndex]?.values ?? [],
+                              )}
+                            </TableCell>
                           </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {currentColumns.map((column, index) => (
-                            <TableRow key={`column-${index}`}>
-                              <TableCell>
-                                <Button
-                                  type="button"
-                                  variant="destructive"
-                                  size="sm"
-                                  disabled={currentColumns.length <= 1}
-                                  onClick={() => deleteColumn(index)}
-                                >
-                                  <TrashIcon className="mb-0.5 size-4" weight="bold" />
-                                </Button>
-                              </TableCell>
-                              <TableCell>
-                                <Checkbox
-                                  id={`column-required-${index}`}
-                                  checked={column.isRequired}
-                                  onCheckedChange={(checked) =>
-                                    updateColumnRequired(index, checked === true)
-                                  }
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Input
-                                  id={`column-name-${index}`}
-                                  value={column.name}
-                                  onChange={(event) => updateColumnName(index, event.target.value)}
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Select
-                                  items={availableTypeOptions}
-                                  value={column.type}
-                                  onValueChange={(value) => updateColumnType(index, value)}
-                                >
-                                  <SelectTrigger className="w-full">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {availableTypeOptions.map((option) => (
-                                      <SelectItem
-                                        key={`${index}-${option.value}`}
-                                        value={option.value}
-                                      >
-                                        {option.label}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
-                                {formatSampleValues(
-                                  currentSampleColumns[column.sourceIndex]?.values ?? [],
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
+                        ))}
+                      </TableBody>
+                    </Table>
 
-                    <div className="flex flex-col gap-3 rounded border p-4 lg:flex-row lg:items-end">
+                    <div className="flex flex-col gap-3 border p-4 lg:flex-row lg:items-end">
                       <div className="flex flex-1 flex-col gap-2">
                         <Input
                           id="custom-column-name"
@@ -1412,56 +1412,54 @@ function RouteComponent() {
                           </Button>
                         </div>
 
-                        <div className="overflow-x-auto border">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead className="w-24">Delete</TableHead>
-                                {currentColumns.map((column, index) => (
-                                  <TableHead key={`review-head-${index}`}>{column.name}</TableHead>
-                                ))}
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {currentRows.length > 0 ? (
-                                currentRows.map((row, rowIndex) => (
-                                  <TableRow key={`review-row-${rowIndex}`}>
-                                    <TableCell>
-                                      <Button
-                                        type="button"
-                                        variant="destructive"
-                                        size="sm"
-                                        onClick={() => deleteReviewRow(rowIndex)}
-                                      >
-                                        <TrashIcon className="mb-0.5 size-4" weight="bold" />
-                                      </Button>
-                                    </TableCell>
-                                    {currentColumns.map((column, columnIndex) => (
-                                      <TableCell key={`review-cell-${rowIndex}-${columnIndex}`}>
-                                        <Input
-                                          value={row[columnIndex] ?? ""}
-                                          onChange={(event) =>
-                                            updateRowCell(rowIndex, columnIndex, event.target.value)
-                                          }
-                                          placeholder={column.name}
-                                        />
-                                      </TableCell>
-                                    ))}
-                                  </TableRow>
-                                ))
-                              ) : (
-                                <TableRow>
-                                  <TableCell
-                                    colSpan={currentColumns.length + 1}
-                                    className="text-center"
-                                  >
-                                    No scanned rows yet. Add one manually if needed.
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-24">Delete</TableHead>
+                              {currentColumns.map((column, index) => (
+                                <TableHead key={`review-head-${index}`}>{column.name}</TableHead>
+                              ))}
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {currentRows.length > 0 ? (
+                              currentRows.map((row, rowIndex) => (
+                                <TableRow key={`review-row-${rowIndex}`}>
+                                  <TableCell>
+                                    <Button
+                                      type="button"
+                                      variant="destructive"
+                                      size="sm"
+                                      onClick={() => deleteReviewRow(rowIndex)}
+                                    >
+                                      <TrashIcon className="mb-0.5 size-4" weight="bold" />
+                                    </Button>
                                   </TableCell>
+                                  {currentColumns.map((column, columnIndex) => (
+                                    <TableCell key={`review-cell-${rowIndex}-${columnIndex}`}>
+                                      <Input
+                                        value={row[columnIndex] ?? ""}
+                                        onChange={(event) =>
+                                          updateRowCell(rowIndex, columnIndex, event.target.value)
+                                        }
+                                        placeholder={column.name}
+                                      />
+                                    </TableCell>
+                                  ))}
                                 </TableRow>
-                              )}
-                            </TableBody>
-                          </Table>
-                        </div>
+                              ))
+                            ) : (
+                              <TableRow>
+                                <TableCell
+                                  colSpan={currentColumns.length + 1}
+                                  className="text-center"
+                                >
+                                  No scanned rows yet. Add one manually if needed.
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
                       </div>
 
                       <div className="flex items-center gap-3">

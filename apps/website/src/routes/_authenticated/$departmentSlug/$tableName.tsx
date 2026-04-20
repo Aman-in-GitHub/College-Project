@@ -1264,7 +1264,7 @@ function RouteComponent() {
                 : "Department staff can view table data only."}
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4">
+          <CardContent className="flex flex-col gap-8">
             {canEdit ? (
               <div className="flex flex-col gap-4 border p-4">
                 <div className="flex flex-col gap-1">
@@ -1418,69 +1418,65 @@ function RouteComponent() {
                         </div>
                       </div>
 
-                      <div className="overflow-x-auto border">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead className="w-24">Delete</TableHead>
-                              <TableHead className="w-44">Status</TableHead>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-24">Delete</TableHead>
+                            <TableHead className="w-44">Status</TableHead>
+                            {editableColumns.map((column) => (
+                              <TableHead key={`import-preview-head-${column.columnName}`}>
+                                {column.columnName}
+                              </TableHead>
+                            ))}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {importPreviewRows.map((row, rowIndex) => (
+                            <TableRow key={`import-preview-row-${rowIndex}`}>
+                              <TableCell>
+                                <Button
+                                  type="button"
+                                  variant="destructive"
+                                  size="sm"
+                                  onClick={() => handleDeletePreviewRow(rowIndex)}
+                                >
+                                  <TrashIcon className="mb-0.5 size-4" weight="bold" />
+                                </Button>
+                              </TableCell>
+                              <TableCell className="text-sm">
+                                {row.duplicateReason === "existing_row" ? (
+                                  <span className="text-destructive">Matches existing row</span>
+                                ) : row.duplicateReason === "batch_duplicate" ? (
+                                  <span className="text-destructive">Duplicate in this import</span>
+                                ) : row.missingRequiredColumns.length > 0 ? (
+                                  <span className="text-red-500">
+                                    Missing: {row.missingRequiredColumns.join(", ")}
+                                  </span>
+                                ) : (
+                                  <span className="text-green-500">Ready</span>
+                                )}
+                              </TableCell>
                               {editableColumns.map((column) => (
-                                <TableHead key={`import-preview-head-${column.columnName}`}>
-                                  {column.columnName}
-                                </TableHead>
+                                <TableCell
+                                  key={`import-preview-cell-${rowIndex}-${column.columnName}`}
+                                >
+                                  <Input
+                                    value={row.values[column.columnName] ?? ""}
+                                    onChange={(event) =>
+                                      handleImportPreviewValueChange(
+                                        rowIndex,
+                                        column.columnName,
+                                        event.target.value,
+                                      )
+                                    }
+                                    placeholder={column.columnName}
+                                  />
+                                </TableCell>
                               ))}
                             </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {importPreviewRows.map((row, rowIndex) => (
-                              <TableRow key={`import-preview-row-${rowIndex}`}>
-                                <TableCell>
-                                  <Button
-                                    type="button"
-                                    variant="destructive"
-                                    size="sm"
-                                    onClick={() => handleDeletePreviewRow(rowIndex)}
-                                  >
-                                    <TrashIcon className="mb-0.5 size-4" weight="bold" />
-                                  </Button>
-                                </TableCell>
-                                <TableCell className="text-sm">
-                                  {row.duplicateReason === "existing_row" ? (
-                                    <span className="text-destructive">Matches existing row</span>
-                                  ) : row.duplicateReason === "batch_duplicate" ? (
-                                    <span className="text-destructive">
-                                      Duplicate in this import
-                                    </span>
-                                  ) : row.missingRequiredColumns.length > 0 ? (
-                                    <span className="text-amber-600">
-                                      Missing: {row.missingRequiredColumns.join(", ")}
-                                    </span>
-                                  ) : (
-                                    <span className="text-emerald-600">Ready</span>
-                                  )}
-                                </TableCell>
-                                {editableColumns.map((column) => (
-                                  <TableCell
-                                    key={`import-preview-cell-${rowIndex}-${column.columnName}`}
-                                  >
-                                    <Input
-                                      value={row.values[column.columnName] ?? ""}
-                                      onChange={(event) =>
-                                        handleImportPreviewValueChange(
-                                          rowIndex,
-                                          column.columnName,
-                                          event.target.value,
-                                        )
-                                      }
-                                      placeholder={column.columnName}
-                                    />
-                                  </TableCell>
-                                ))}
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
+                          ))}
+                        </TableBody>
+                      </Table>
 
                       <div className="flex flex-col gap-3 sm:flex-row">
                         <Button
