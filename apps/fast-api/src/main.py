@@ -8,6 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Literal, TypedDict
 
+import pandas as pd
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
@@ -199,59 +200,35 @@ def normalize_header(header: str, index: int) -> str:
     return fallback_name or f"column_{index + 1}"
 
 
-def infer_column_type_from_header(header: str) -> DbColumnType:
-    normalized_header = normalize_header(header, 0)
+def infer_type_with_pandas(values: list[str]) -> str:
+    cleaned = [v.strip() for v in values if v and v.strip()]
+    if not cleaned:
+        return "text"
 
-    if normalized_header in {"created_at", "updated_at", "timestamp", "datetime"}:
-        return "timestamp"
+    s = pd.Series(cleaned)
 
-    if (
-        "timestamp" in normalized_header
-        or "datetime" in normalized_header
-        or normalized_header.endswith("_at")
-    ):
-        return "timestamp"
-
-    if normalized_header in {"date", "dob", "birth_date"} or normalized_header.endswith(
-        "_date"
-    ):
-        return "date"
-
-    if normalized_header == "time" or normalized_header.endswith("_time"):
-        return "time"
-
-    if (
-        normalized_header.startswith("is_")
-        or normalized_header.startswith("has_")
-        or normalized_header.startswith("can_")
-        or normalized_header
-        in {"active", "enabled", "verified", "available", "present"}
-    ):
+    bool_values = {"true", "false", "yes", "no"}
+    if s.str.lower().isin(bool_values).mean() > 0.9:
         return "boolean"
 
-    if normalized_header == "id" or normalized_header.endswith("_id"):
-        return "integer"
+    s_clean = s.str.replace(r"[^\d\.\-]", "", regex=True)
+    numeric = pd.to_numeric(s_clean, errors="coerce")
+    numeric_ratio = numeric.notna().mean()
 
-    if any(
-        token in normalized_header
-        for token in {"count", "qty", "quantity", "age", "year", "rank", "number", "no"}
-    ):
-        return "integer"
-
-    if any(
-        token in normalized_header
-        for token in {
-            "amount",
-            "price",
-            "cost",
-            "total",
-            "balance",
-            "rate",
-            "percent",
-            "score",
-        }
-    ):
+    if numeric_ratio > 0.9:
+        numeric_clean = numeric.dropna()
+        if (numeric_clean % 1 == 0).all():
+            return "integer"
         return "numeric"
+
+    dt = pd.to_datetime(s, errors="coerce")
+    dt_ratio = dt.notna().mean()
+
+    if dt_ratio > 0.9:
+        times = dt.dropna().dt.time
+        if all(t.hour == 0 and t.minute == 0 and t.second == 0 for t in times):
+            return "date"
+        return "timestamp"
 
     return "text"
 
@@ -391,7 +368,7 @@ def structure_html_table(html_content: str) -> dict[str, object] | None:
         columns.append(
             {
                 "name": normalize_header(header, column_index),
-                "inferredType": infer_column_type_from_header(header),
+                "inferredType": infer_type_with_pandas(values),
                 "values": values,
             }
         )

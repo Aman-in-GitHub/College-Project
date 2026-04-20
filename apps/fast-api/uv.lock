@@ -522,6 +522,7 @@ dependencies = [
     { name = "fastapi", extra = ["standard"] },
     { name = "paddleocr", extra = ["all"] },
     { name = "paddlepaddle" },
+    { name = "pandas" },
     { name = "python-dotenv" },
 ]
 
@@ -530,6 +531,7 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.136.0" },
     { name = "paddleocr", extras = ["all"], specifier = ">=3.4.1" },
     { name = "paddlepaddle", specifier = "==3.2.0" },
+    { name = "pandas", specifier = ">=3.0.2" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
 ]
 
