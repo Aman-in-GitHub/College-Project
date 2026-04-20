@@ -1015,7 +1015,7 @@ function RouteComponent() {
                       : "Staff accounts created from this department admin account are listed here."}
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="flex flex-col gap-3">
+                <CardContent className="grid gap-3 lg:grid-cols-2">
                   {managedUsersQuery.isLoading ? (
                     <p className="text-sm text-muted-foreground">Loading...</p>
                   ) : managedUsersQuery.isError ? (
@@ -1090,7 +1090,7 @@ function RouteComponent() {
                   </CardTitle>
                   <CardDescription>Open digitized tables for {department.name}.</CardDescription>
                 </CardHeader>
-                <CardContent className="grid gap-3 sm:grid-cols-2">
+                <CardContent className="grid gap-3 lg:grid-cols-2">
                   {departmentTablesQuery.isLoading ? (
                     <p className="text-sm text-muted-foreground sm:col-span-2">Loading tables...</p>
                   ) : departmentTablesQuery.isError ? (
