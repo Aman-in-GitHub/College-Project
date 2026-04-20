@@ -1,4 +1,5 @@
 import { clsx, type ClassValue } from "clsx";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { twMerge } from "tailwind-merge";
 import * as XLSX from "xlsx";
@@ -105,6 +106,22 @@ export function buildExportFilename(params: {
   format: ExportFileFormat;
 }): string {
   return `${params.baseName}_${params.suffix}.${params.format}`;
+}
+
+export function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedValue(value);
+    }, delayMs);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [delayMs, value]);
+
+  return debouncedValue;
 }
 
 export function exportRecordsFile(params: {

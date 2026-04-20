@@ -23,7 +23,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { env } from "@/lib/env";
-import { fetchApiJson, getEnterAnimationProps, isRecord } from "@/lib/utils";
+import { fetchApiJson, getEnterAnimationProps, isRecord, useDebouncedValue } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/logs")({
   component: RouteComponent,
@@ -128,9 +128,10 @@ function RouteComponent() {
   const isReducedMotion = useReducedMotion() === true;
   const [search, setSearch] = useState("");
   const [action, setAction] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 300);
   const logsQuery = useQuery({
-    queryKey: ["audit-logs", search, action],
-    queryFn: () => fetchLogs({ search, action }),
+    queryKey: ["audit-logs", debouncedSearch, action],
+    queryFn: () => fetchLogs({ search: debouncedSearch, action }),
     enabled: accessContext.role === "system_admin",
   });
 

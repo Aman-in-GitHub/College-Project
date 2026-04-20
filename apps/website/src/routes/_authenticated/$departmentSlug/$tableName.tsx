@@ -54,6 +54,7 @@ import {
   showInfoToast,
   showSuccessToast,
   showWarningToast,
+  useDebouncedValue,
   type ExportFileFormat,
 } from "@/lib/utils";
 
@@ -390,22 +391,6 @@ function exportRowsToFile(params: {
     filename: params.filename,
     format: params.format,
   });
-}
-
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debouncedValue, setDebouncedValue] = useState(value);
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      setDebouncedValue(value);
-    }, delayMs);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [delayMs, value]);
-
-  return debouncedValue;
 }
 
 function EditableTableCell({
