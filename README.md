@@ -1,6 +1,6 @@
 # College Project
 
-A full-stack document digitization system that converts paper tables from photos into structured PostgreSQL data. It uses a Python microservice with PaddleOCR for the default table scan flow with Gemini available as a fallback when needed. Data can then be reviewed, edited, imported into tables, and exported through the web dashboard in formats like CSV, JSON, and XLSX.
+A full-stack document digitization system that converts paper tables from photos into structured PostgreSQL data. It uses a Python microservice with PaddleOCR and Gemini-based OCR flows to process scanned images. Scanned data can be reviewed before saving, imported into department tables with duplicate detection, edited through the dashboard, exported in formats like CSV, JSON, and XLSX and tracked through an audit log system with an admin-only logs page.
 
 ## Apps
 
@@ -20,6 +20,31 @@ A full-stack document digitization system that converts paper tables from photos
 - `PostgreSQL`
 - `Zod`
 - `pnpm` workspaces
+
+## Features
+
+- Role-based access with `system_admin`, `department_admin`, and `department_staff`
+- Department and staff management
+- OCR table scanning from images using `PaddleOCR` and `Gemini`
+- OCR review step before creating a table or importing rows
+- Dynamic PostgreSQL table creation from scanned schemas
+- Row import into existing tables from image and CSV files
+- Duplicate row detection during import
+- Inline row editing, creation, deletion, search, and pagination
+- Export to `CSV`, `JSON`, and `XLSX`
+- Audit logging for table creation and row-level changes
+- Admin-only logs page for reviewing system activity
+
+## How It Works
+
+- A `system_admin` creates department admins
+- A `department_admin` creates staff and manages department tables
+- Users scan paper tables from images using `PaddleOCR` or `Gemini`
+- Scanned rows are reviewed and corrected before saving
+- New tables can be created from scanned schemas and data
+- Existing tables can import rows from images or CSV files
+- Duplicate rows are detected and skipped during import
+- All important actions are stored in audit logs
 
 ## Getting Started
 

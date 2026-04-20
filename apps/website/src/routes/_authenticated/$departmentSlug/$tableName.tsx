@@ -126,6 +126,28 @@ type ImportRowsResponse = {
   message: string;
   data: {
     insertedRowCount: number;
+    skippedDuplicateCount?: number;
+  };
+};
+
+type ImportPreviewRow = {
+  values: Record<string, string | null>;
+  missingRequiredColumns: string[];
+  duplicateReason: "existing_row" | "batch_duplicate" | null;
+};
+
+type ImportPreviewResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    columns: TableColumn[];
+    rows: ImportPreviewRow[];
+    summary: {
+      totalRows: number;
+      duplicateRows: number;
+      rowsWithMissingRequiredValues: number;
+      readyRows: number;
+    };
   };
 };
 
@@ -232,6 +254,36 @@ function isImportRowsResponse(value: unknown): value is ImportRowsResponse {
   );
 }
 
+function isImportPreviewRow(value: unknown): value is ImportPreviewRow {
+  return (
+    isRecord(value) &&
+    isRecord(value.values) &&
+    Array.isArray(value.missingRequiredColumns) &&
+    value.missingRequiredColumns.every((column) => typeof column === "string") &&
+    (value.duplicateReason === "existing_row" ||
+      value.duplicateReason === "batch_duplicate" ||
+      value.duplicateReason === null)
+  );
+}
+
+function isImportPreviewResponse(value: unknown): value is ImportPreviewResponse {
+  return (
+    isRecord(value) &&
+    typeof value.success === "boolean" &&
+    typeof value.message === "string" &&
+    isRecord(value.data) &&
+    Array.isArray(value.data.columns) &&
+    value.data.columns.every((column) => isTableColumn(column)) &&
+    Array.isArray(value.data.rows) &&
+    value.data.rows.every((row) => isImportPreviewRow(row)) &&
+    isRecord(value.data.summary) &&
+    typeof value.data.summary.totalRows === "number" &&
+    typeof value.data.summary.duplicateRows === "number" &&
+    typeof value.data.summary.rowsWithMissingRequiredValues === "number" &&
+    typeof value.data.summary.readyRows === "number"
+  );
+}
+
 function isDeleteRowResponse(value: unknown): value is DeleteRowResponse {
   return (
     isRecord(value) &&
@@ -261,6 +313,59 @@ function formatTableDisplayValue(columnName: string, value: TableValue): string 
   }
 
   return formattedValue;
+}
+
+function buildImportReviewSignature(
+  values: Record<string, string | null>,
+  columns: TableColumn[],
+): string {
+  return JSON.stringify(columns.map((column) => values[column.columnName] ?? null));
+}
+
+function reconcileImportPreviewRows(
+  rows: ImportPreviewRow[],
+  columns: TableColumn[],
+): ImportPreviewRow[] {
+  const existingSignatures = new Set(
+    rows
+      .filter((row) => row.duplicateReason === "existing_row")
+      .map((row) => buildImportReviewSignature(row.values, columns)),
+  );
+  const batchSignatures = new Set<string>();
+
+  return rows.map((row) => {
+    const missingRequiredColumns = columns
+      .filter((column) => !column.isNullable && (row.values[column.columnName] ?? null) === null)
+      .map((column) => column.columnName);
+    const signature = buildImportReviewSignature(row.values, columns);
+    let duplicateReason: ImportPreviewRow["duplicateReason"] = null;
+
+    if (existingSignatures.has(signature)) {
+      duplicateReason = "existing_row";
+    } else if (batchSignatures.has(signature)) {
+      duplicateReason = "batch_duplicate";
+    } else {
+      batchSignatures.add(signature);
+    }
+
+    return {
+      ...row,
+      missingRequiredColumns,
+      duplicateReason,
+    };
+  });
+}
+
+function summarizeImportPreviewRows(rows: ImportPreviewRow[]) {
+  return {
+    totalRows: rows.length,
+    duplicateRows: rows.filter((row) => row.duplicateReason !== null).length,
+    rowsWithMissingRequiredValues: rows.filter((row) => row.missingRequiredColumns.length > 0)
+      .length,
+    readyRows: rows.filter(
+      (row) => row.duplicateReason === null && row.missingRequiredColumns.length === 0,
+    ).length,
+  };
 }
 
 function exportRowsToFile(params: {
@@ -434,17 +539,17 @@ async function addTableRow(params: {
   return body;
 }
 
-async function importTableRowsFromImage(params: {
+async function previewImageImport(params: {
   departmentSlug: string;
   tableName: string;
   file: File;
   source: ImportSource;
-}): Promise<ImportRowsResponse> {
+}): Promise<ImportPreviewResponse> {
   const formData = new FormData();
   formData.append("file", params.file, params.file.name);
 
   const { response, body } = await fetchApiJson(
-    `${env.VITE_SERVER_URL}/api/tables/${encodeURIComponent(params.tableName)}/import-image?source=${encodeURIComponent(params.source)}`,
+    `${env.VITE_SERVER_URL}/api/tables/${encodeURIComponent(params.tableName)}/import-image/preview?source=${encodeURIComponent(params.source)}`,
     {
       method: "POST",
       headers: {
@@ -459,11 +564,49 @@ async function importTableRowsFromImage(params: {
       throw new Error(body.message);
     }
 
-    throw new Error("Failed to import rows from image.");
+    throw new Error("Failed to preview rows from image.");
+  }
+
+  if (!isImportPreviewResponse(body)) {
+    throw new Error("Invalid import preview response.");
+  }
+
+  return body;
+}
+
+async function confirmImageImport(params: {
+  departmentSlug: string;
+  tableName: string;
+  source: ImportSource;
+  rows: ImportPreviewRow[];
+}): Promise<ImportRowsResponse> {
+  const { response, body } = await fetchApiJson(
+    `${env.VITE_SERVER_URL}/api/tables/${encodeURIComponent(params.tableName)}/import-image/commit`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-department-slug": params.departmentSlug,
+      },
+      body: JSON.stringify({
+        source: params.source,
+        rows: params.rows.map((row) => ({
+          values: row.values,
+        })),
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    if (isRecord(body) && typeof body.message === "string") {
+      throw new Error(body.message);
+    }
+
+    throw new Error("Failed to confirm image import.");
   }
 
   if (!isImportRowsResponse(body)) {
-    throw new Error("Invalid import response.");
+    throw new Error("Invalid import confirmation response.");
   }
 
   return body;
@@ -549,6 +692,8 @@ function RouteComponent() {
   const [newRowValues, setNewRowValues] = useState<Record<string, string>>({});
   const [selectedImportFile, setSelectedImportFile] = useState<File | null>(null);
   const [importPreviewUrl, setImportPreviewUrl] = useState<string | null>(null);
+  const [importPreviewRows, setImportPreviewRows] = useState<ImportPreviewRow[]>([]);
+  const [importPreviewSource, setImportPreviewSource] = useState<ImportSource | null>(null);
   const [isExportingAll, setIsExportingAll] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFileFormat>("xlsx");
   const [deletingRowId, setDeletingRowId] = useState<string | null>(null);
@@ -616,11 +761,24 @@ function RouteComponent() {
     },
   });
   const importRowsMutation = useMutation({
-    mutationFn: importTableRowsFromImage,
+    mutationFn: previewImageImport,
     onSuccess: (payload) => {
       setActiveImportSource(null);
+      setImportPreviewRows(reconcileImportPreviewRows(payload.data.rows, payload.data.columns));
+      showInfoToast(payload.message);
+    },
+    onError: (error) => {
+      setActiveImportSource(null);
+      showErrorToast(error instanceof Error ? error.message : "Failed to import rows.");
+    },
+  });
+  const confirmImportMutation = useMutation({
+    mutationFn: confirmImageImport,
+    onSuccess: (payload) => {
       showSuccessToast(payload.message);
       setSelectedImportFile(null);
+      setImportPreviewRows([]);
+      setImportPreviewSource(null);
 
       if (importCameraInputRef.current) {
         importCameraInputRef.current.value = "";
@@ -639,8 +797,7 @@ function RouteComponent() {
       });
     },
     onError: (error) => {
-      setActiveImportSource(null);
-      showErrorToast(error instanceof Error ? error.message : "Failed to import rows.");
+      showErrorToast(error instanceof Error ? error.message : "Failed to confirm import.");
     },
   });
   const importCsvMutation = useMutation({
@@ -696,6 +853,7 @@ function RouteComponent() {
   const rows = tableQuery.data?.data.rows ?? [];
   const totalRows = tableQuery.data?.data.pagination.totalRows ?? 0;
   const editableColumns = tableColumns.filter((column) => column.columnName !== "id");
+  const importPreviewSummary = summarizeImportPreviewRows(importPreviewRows);
   const canAddRow = editableColumns.some(
     (column) => (newRowValues[column.columnName] ?? "").trim().length > 0,
   );
@@ -858,6 +1016,8 @@ function RouteComponent() {
     const inputId = event.target.id;
 
     setSelectedImportFile(file);
+    setImportPreviewRows([]);
+    setImportPreviewSource(null);
 
     if (inputId === "table-import-camera" && importUploadInputRef.current) {
       importUploadInputRef.current.value = "";
@@ -884,6 +1044,8 @@ function RouteComponent() {
 
   function handleClearImportSelection() {
     setSelectedImportFile(null);
+    setImportPreviewRows([]);
+    setImportPreviewSource(null);
 
     if (importCameraInputRef.current) {
       importCameraInputRef.current.value = "";
@@ -928,11 +1090,54 @@ function RouteComponent() {
     }
 
     setActiveImportSource(source);
+    setImportPreviewSource(source);
     await importRowsMutation.mutateAsync({
       departmentSlug: params.departmentSlug,
       tableName: params.tableName,
       file: selectedImportFile,
       source,
+    });
+  }
+
+  function handleImportPreviewValueChange(rowIndex: number, columnName: string, nextValue: string) {
+    setImportPreviewRows((previous) =>
+      reconcileImportPreviewRows(
+        previous.map((row, index) =>
+          index === rowIndex
+            ? {
+                ...row,
+                values: {
+                  ...row.values,
+                  [columnName]: nextValue.length > 0 ? nextValue : null,
+                },
+              }
+            : row,
+        ),
+        editableColumns,
+      ),
+    );
+  }
+
+  function handleDeletePreviewRow(rowIndex: number) {
+    setImportPreviewRows((previous) =>
+      reconcileImportPreviewRows(
+        previous.filter((_, index) => index !== rowIndex),
+        editableColumns,
+      ),
+    );
+  }
+
+  function handleConfirmImport() {
+    if (!importPreviewSource) {
+      showWarningToast("No import preview is available.");
+      return;
+    }
+
+    void confirmImportMutation.mutateAsync({
+      departmentSlug: params.departmentSlug,
+      tableName: params.tableName,
+      source: importPreviewSource,
+      rows: importPreviewRows,
     });
   }
 
@@ -1177,6 +1382,132 @@ function RouteComponent() {
                     Clear
                   </Button>
                 </div>
+
+                <AnimatePresence initial={false}>
+                  {importPreviewRows.length > 0 ? (
+                    <motion.div
+                      key="ocr-import-review"
+                      className="flex flex-col gap-4 border p-4"
+                      {...getExitAnimationProps(isReducedMotion, 10)}
+                    >
+                      <div className="flex flex-col gap-1">
+                        <div className="text-sm font-medium">OCR Review</div>
+                        <div className="text-sm text-muted-foreground">
+                          Review extracted rows before saving them to the table.
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-4">
+                        <div className="border p-3 text-sm">
+                          <div className="font-medium">{importPreviewSummary.totalRows}</div>
+                          <div className="text-muted-foreground">Total rows</div>
+                        </div>
+                        <div className="border p-3 text-sm">
+                          <div className="font-medium">{importPreviewSummary.readyRows}</div>
+                          <div className="text-muted-foreground">Ready rows</div>
+                        </div>
+                        <div className="border p-3 text-sm">
+                          <div className="font-medium">{importPreviewSummary.duplicateRows}</div>
+                          <div className="text-muted-foreground">Duplicate rows</div>
+                        </div>
+                        <div className="border p-3 text-sm">
+                          <div className="font-medium">
+                            {importPreviewSummary.rowsWithMissingRequiredValues}
+                          </div>
+                          <div className="text-muted-foreground">Missing required values</div>
+                        </div>
+                      </div>
+
+                      <div className="overflow-x-auto border">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-24">Delete</TableHead>
+                              <TableHead className="w-44">Status</TableHead>
+                              {editableColumns.map((column) => (
+                                <TableHead key={`import-preview-head-${column.columnName}`}>
+                                  {column.columnName}
+                                </TableHead>
+                              ))}
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {importPreviewRows.map((row, rowIndex) => (
+                              <TableRow key={`import-preview-row-${rowIndex}`}>
+                                <TableCell>
+                                  <Button
+                                    type="button"
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => handleDeletePreviewRow(rowIndex)}
+                                  >
+                                    <TrashIcon className="mb-0.5 size-4" weight="bold" />
+                                  </Button>
+                                </TableCell>
+                                <TableCell className="text-sm">
+                                  {row.duplicateReason === "existing_row" ? (
+                                    <span className="text-destructive">Matches existing row</span>
+                                  ) : row.duplicateReason === "batch_duplicate" ? (
+                                    <span className="text-destructive">
+                                      Duplicate in this import
+                                    </span>
+                                  ) : row.missingRequiredColumns.length > 0 ? (
+                                    <span className="text-amber-600">
+                                      Missing: {row.missingRequiredColumns.join(", ")}
+                                    </span>
+                                  ) : (
+                                    <span className="text-emerald-600">Ready</span>
+                                  )}
+                                </TableCell>
+                                {editableColumns.map((column) => (
+                                  <TableCell
+                                    key={`import-preview-cell-${rowIndex}-${column.columnName}`}
+                                  >
+                                    <Input
+                                      value={row.values[column.columnName] ?? ""}
+                                      onChange={(event) =>
+                                        handleImportPreviewValueChange(
+                                          rowIndex,
+                                          column.columnName,
+                                          event.target.value,
+                                        )
+                                      }
+                                      placeholder={column.columnName}
+                                    />
+                                  </TableCell>
+                                ))}
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+
+                      <div className="flex flex-col gap-3 sm:flex-row">
+                        <Button
+                          type="button"
+                          className="w-full sm:w-auto"
+                          disabled={
+                            confirmImportMutation.isPending || importPreviewRows.length === 0
+                          }
+                          onClick={handleConfirmImport}
+                        >
+                          <FloppyDiskIcon className="mb-1 size-4" weight="bold" />
+                          {confirmImportMutation.isPending ? "Saving..." : "Confirm Import"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full sm:w-auto"
+                          disabled={confirmImportMutation.isPending}
+                          onClick={handleClearImportSelection}
+                        >
+                          <EraserIcon className="mb-1 size-4" weight="bold" />
+                          Discard Preview
+                        </Button>
+                      </div>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
               </div>
             ) : null}
 

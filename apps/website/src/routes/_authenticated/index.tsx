@@ -1,8 +1,8 @@
 import {
-  BankIcon,
   CameraIcon,
   EraserIcon,
   HouseLineIcon,
+  ListBulletsIcon,
   MagnifyingGlassIcon,
   PlusIcon,
   ProhibitIcon,
@@ -172,21 +172,14 @@ type DepartmentTablesResponse = {
   };
 };
 
-function toScanRows(columns: EditableColumn[], sampleColumns: ScannedColumn[]): string[][] {
-  const rowCount = columns.reduce((maxCount, column) => {
-    const sampleColumn = sampleColumns[column.sourceIndex];
-
-    return Math.max(maxCount, sampleColumn?.values.length ?? 0);
-  }, 0);
+function buildRowsFromScannedColumns(columns: ScannedColumn[]): string[][] {
+  const rowCount = columns.reduce(
+    (maxCount, column) => Math.max(maxCount, column.values.length),
+    0,
+  );
 
   return Array.from({ length: rowCount }, (_, rowIndex) =>
-    columns.map((column) => {
-      if (column.sourceIndex < 0) {
-        return "";
-      }
-
-      return sampleColumns[column.sourceIndex]?.values[rowIndex] ?? "";
-    }),
+    columns.map((column) => column.values[rowIndex] ?? ""),
   );
 }
 
@@ -510,6 +503,7 @@ function RouteComponent() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [editableSchemas, setEditableSchemas] = useState<EditableColumn[][]>([]);
+  const [editableRows, setEditableRows] = useState<string[][][]>([]);
   const [selectedTableIndex, setSelectedTableIndex] = useState(0);
   const [tableName, setTableName] = useState("");
   const [isFillDataEnabled, setIsFillDataEnabled] = useState(true);
@@ -590,6 +584,9 @@ function RouteComponent() {
           })),
         ),
       );
+      setEditableRows(
+        payload.data.tables.map((table) => buildRowsFromScannedColumns(table.columns)),
+      );
       setSelectedTableIndex(0);
       setActiveScanSource(null);
 
@@ -668,7 +665,7 @@ function RouteComponent() {
 
   const currentColumns = editableSchemas[activeTableIndex] ?? [];
   const currentSampleColumns = scanResult[activeTableIndex]?.columns ?? [];
-  const currentRows = toScanRows(currentColumns, currentSampleColumns);
+  const currentRows = editableRows[activeTableIndex] ?? [];
   const detectedTableOptions = scanResult.map((_, index) => ({
     value: String(index),
     label: `Table ${index + 1}`,
@@ -704,6 +701,7 @@ function RouteComponent() {
     setSelectedFile(null);
     setPreviewUrl(null);
     setEditableSchemas([]);
+    setEditableRows([]);
     setSelectedTableIndex(0);
     setTableName("");
     setIsFillDataEnabled(true);
@@ -822,6 +820,15 @@ function RouteComponent() {
         return tableColumns.filter((_, index) => index !== columnIndex);
       }),
     );
+    setEditableRows((previous) =>
+      previous.map((tableRows, tableIndex) => {
+        if (tableIndex !== activeTableIndex) {
+          return tableRows;
+        }
+
+        return tableRows.map((row) => row.filter((_, index) => index !== columnIndex));
+      }),
+    );
   }
 
   function addCustomColumn() {
@@ -849,8 +856,57 @@ function RouteComponent() {
         ];
       }),
     );
+    setEditableRows((previous) =>
+      previous.map((tableRows, tableIndex) => {
+        if (tableIndex !== activeTableIndex) {
+          return tableRows;
+        }
+
+        return tableRows.map((row) => [...row, ""]);
+      }),
+    );
     setCustomColumnName("");
     setCustomColumnType("text");
+  }
+
+  function updateRowCell(rowIndex: number, columnIndex: number, nextValue: string) {
+    setEditableRows((previous) =>
+      previous.map((tableRows, tableIndex) => {
+        if (tableIndex !== activeTableIndex) {
+          return tableRows;
+        }
+
+        return tableRows.map((row, index) =>
+          index === rowIndex
+            ? row.map((cell, cellIndex) => (cellIndex === columnIndex ? nextValue : cell))
+            : row,
+        );
+      }),
+    );
+  }
+
+  function addReviewRow() {
+    setEditableRows((previous) =>
+      previous.map((tableRows, tableIndex) => {
+        if (tableIndex !== activeTableIndex) {
+          return tableRows;
+        }
+
+        return [...tableRows, Array.from({ length: currentColumns.length }, () => "")];
+      }),
+    );
+  }
+
+  function deleteReviewRow(rowIndex: number) {
+    setEditableRows((previous) =>
+      previous.map((tableRows, tableIndex) => {
+        if (tableIndex !== activeTableIndex) {
+          return tableRows;
+        }
+
+        return tableRows.filter((_, index) => index !== rowIndex);
+      }),
+    );
   }
 
   async function createTable() {
@@ -918,6 +974,14 @@ function RouteComponent() {
             <Link to="/create" className={buttonVariants({ className: "w-full sm:w-auto" })}>
               <PlusIcon className="mb-1 size-4" weight="bold" />
               Create New
+            </Link>
+          )}
+          {isSystemAdmin && (
+            <Link to="/logs">
+              <Button variant="outline" className="w-full sm:w-auto">
+                <ListBulletsIcon className="mb-1 size-4" weight="bold" />
+                Logs
+              </Button>
             </Link>
           )}
           <Button
@@ -1329,6 +1393,77 @@ function RouteComponent() {
                     </div>
 
                     <div className="flex flex-col gap-3">
+                      <div className="flex flex-col gap-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-medium">OCR Review</div>
+                            <div className="text-sm text-muted-foreground">
+                              Review and correct scanned row values before saving the table.
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="w-full sm:w-auto"
+                            onClick={addReviewRow}
+                          >
+                            <PlusIcon className="mb-1 size-4" weight="bold" />
+                            Add Row
+                          </Button>
+                        </div>
+
+                        <div className="overflow-x-auto border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="w-24">Delete</TableHead>
+                                {currentColumns.map((column, index) => (
+                                  <TableHead key={`review-head-${index}`}>{column.name}</TableHead>
+                                ))}
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {currentRows.length > 0 ? (
+                                currentRows.map((row, rowIndex) => (
+                                  <TableRow key={`review-row-${rowIndex}`}>
+                                    <TableCell>
+                                      <Button
+                                        type="button"
+                                        variant="destructive"
+                                        size="sm"
+                                        onClick={() => deleteReviewRow(rowIndex)}
+                                      >
+                                        <TrashIcon className="mb-0.5 size-4" weight="bold" />
+                                      </Button>
+                                    </TableCell>
+                                    {currentColumns.map((column, columnIndex) => (
+                                      <TableCell key={`review-cell-${rowIndex}-${columnIndex}`}>
+                                        <Input
+                                          value={row[columnIndex] ?? ""}
+                                          onChange={(event) =>
+                                            updateRowCell(rowIndex, columnIndex, event.target.value)
+                                          }
+                                          placeholder={column.name}
+                                        />
+                                      </TableCell>
+                                    ))}
+                                  </TableRow>
+                                ))
+                              ) : (
+                                <TableRow>
+                                  <TableCell
+                                    colSpan={currentColumns.length + 1}
+                                    className="text-center"
+                                  >
+                                    No scanned rows yet. Add one manually if needed.
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+
                       <div className="flex items-center gap-3">
                         <Checkbox
                           id="fill-data"

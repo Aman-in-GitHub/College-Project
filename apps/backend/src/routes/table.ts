@@ -7,6 +7,7 @@ import type { AppEnv } from "@/types/index.ts";
 import type { ScannedTable } from "@/types/table.ts";
 
 import { db, postgresClient } from "@/db/index.ts";
+import { createAuditLog } from "@/lib/audit-log.ts";
 import { DB_COLUMN_TYPES, PG_TYPE_BY_DB_TYPE } from "@/lib/constants.ts";
 import {
   scanExistingTableRowsWithGemini,
@@ -50,6 +51,15 @@ const TABLE_SCAN_SOURCE_SCHEMA = z.object({
   source: z.enum(["gemini", "paddle"]).default("gemini"),
 });
 
+const IMPORT_PREVIEW_ROW_SCHEMA = z.object({
+  values: z.record(z.string(), z.string().nullable()),
+});
+
+const IMPORT_IMAGE_COMMIT_SCHEMA = z.object({
+  rows: z.array(IMPORT_PREVIEW_ROW_SCHEMA).min(1).max(1000),
+  source: z.enum(["gemini", "paddle"]).default("gemini"),
+});
+
 type NormalizedColumn = {
   name: string;
   normalizedName: string;
@@ -64,6 +74,12 @@ type TableColumn = {
 };
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type DuplicateReason = "existing_row" | "batch_duplicate" | null;
+type ImportPreviewRow = {
+  values: Record<string, string | null>;
+  missingRequiredColumns: string[];
+  duplicateReason: DuplicateReason;
+};
 
 const SYSTEM_TABLE_COLUMN_NAMES = new Set([
   "id",
@@ -460,6 +476,145 @@ function buildImportedRowsFromScan(scanTable: ScannedTable, columns: TableColumn
     .filter((row) => row.some((value) => value !== null));
 }
 
+function buildRowSignature(row: Array<string | null>): string {
+  return JSON.stringify(row.map((value) => value ?? null));
+}
+
+async function getExistingRowSignatures(
+  tableName: string,
+  columns: TableColumn[],
+): Promise<Set<string>> {
+  if (columns.length === 0) {
+    return new Set();
+  }
+
+  const typedRowsQuery = postgresClient<Record<string, string | number | boolean | null>[]>;
+  const columnSelections = columns.map((column) => quoteIdentifier(column.columnName)).join(", ");
+  const rows = await typedRowsQuery.unsafe(
+    `SELECT ${columnSelections} FROM ${quoteTableIdentifier(tableName)}`,
+  );
+
+  return new Set(
+    rows.map((row) =>
+      buildRowSignature(
+        columns.map((column) => {
+          const value = row[column.columnName];
+          return value === null || value === undefined ? null : String(value);
+        }),
+      ),
+    ),
+  );
+}
+
+function toImportPreviewRows(
+  rows: Array<Array<string | null>>,
+  columns: TableColumn[],
+  existingSignatures: Set<string>,
+): ImportPreviewRow[] {
+  const batchSignatures = new Set<string>();
+
+  return rows.map((row) => {
+    const signature = buildRowSignature(row);
+    const missingRequiredColumns = columns
+      .filter((column, index) => !column.isNullable && row[index] === null)
+      .map((column) => column.columnName);
+    let duplicateReason: DuplicateReason = null;
+
+    if (existingSignatures.has(signature)) {
+      duplicateReason = "existing_row";
+    } else if (batchSignatures.has(signature)) {
+      duplicateReason = "batch_duplicate";
+    } else {
+      batchSignatures.add(signature);
+    }
+
+    return {
+      values: Object.fromEntries(
+        columns.map((column, index) => [column.columnName, row[index] ?? null]),
+      ),
+      missingRequiredColumns,
+      duplicateReason,
+    };
+  });
+}
+
+function summarizePreviewRows(rows: ImportPreviewRow[]) {
+  return {
+    totalRows: rows.length,
+    duplicateRows: rows.filter((row) => row.duplicateReason !== null).length,
+    rowsWithMissingRequiredValues: rows.filter((row) => row.missingRequiredColumns.length > 0)
+      .length,
+    readyRows: rows.filter(
+      (row) => row.duplicateReason === null && row.missingRequiredColumns.length === 0,
+    ).length,
+  };
+}
+
+function normalizeCommittedImportRows(
+  rows: Array<{ values: Record<string, string | null> }>,
+  columns: TableColumn[],
+) {
+  return rows.map((row, rowIndex) => {
+    const values = columns.map((column) =>
+      normalizeUpdatedCellValue(row.values[column.columnName] ?? null, column.dataType),
+    );
+    const missingRequiredColumns = columns
+      .filter((column, columnIndex) => !column.isNullable && values[columnIndex] === null)
+      .map((column) => column.columnName);
+
+    return {
+      rowIndex,
+      values,
+      missingRequiredColumns,
+    };
+  });
+}
+
+async function buildImageImportPreview(params: {
+  file: File;
+  logger: AppEnv["Variables"]["logger"];
+  source: "gemini" | "paddle";
+  tableName: string;
+  normalizedDepartmentTableName: string;
+  editableColumns: TableColumn[];
+}): Promise<ImportPreviewRow[]> {
+  const normalizedRows =
+    params.source === "paddle"
+      ? await (async () => {
+          const scannedTables = await scanTableImageWithPaddle(params.file, params.logger);
+          const scanTable = selectBestMatchingScanTable(scannedTables, params.editableColumns);
+
+          if (scanTable === null) {
+            return [];
+          }
+
+          return buildImportedRowsFromScan(scanTable, params.editableColumns);
+        })()
+      : (
+          await scanExistingTableRowsWithGemini({
+            file: params.file,
+            logger: params.logger,
+            tableName: params.tableName,
+            columns: params.editableColumns.map((column) => ({
+              name: column.columnName,
+              dataType: column.dataType,
+              isNullable: column.isNullable,
+            })),
+          })
+        ).map((row) =>
+          params.editableColumns.map((column, columnIndex) =>
+            normalizeUpdatedCellValue(row[columnIndex] ?? "", column.dataType),
+          ),
+        );
+
+  const existingSignatures = await getExistingRowSignatures(
+    params.normalizedDepartmentTableName,
+    params.editableColumns,
+  );
+
+  return toImportPreviewRows(normalizedRows, params.editableColumns, existingSignatures);
+}
+
 export const tableRoutes = new Hono<AppEnv>();
 
 tableRoutes.get("/api/tables", requireDepartmentStaff, async (c) => {
@@ -735,6 +890,18 @@ tableRoutes.patch("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin, 
     `UPDATE ${quotedTableName} SET ${setClause}, ${quoteIdentifier("updated_at")} = NOW() WHERE "id" = ${toSqlLiteral(rowId)}`,
   );
 
+  await createAuditLog({
+    action: "row_update",
+    actorUserId: user?.id ?? null,
+    departmentId: department.id,
+    tableName: normalizedDepartmentTableName,
+    rowId,
+    summary: `Updated row ${rowId} in ${tableName}.`,
+    metadata: {
+      updatedColumns: normalizedEntries.map((entry) => entry.column.columnName),
+    },
+  });
+
   return c.json(
     {
       success: true,
@@ -893,6 +1060,18 @@ tableRoutes.post("/api/tables/:tableName/rows", requireDepartmentAdmin, async (c
     `INSERT INTO ${quotedTableName} (${insertColumns.join(", ")}) VALUES (${insertValues.join(", ")})`,
   );
 
+  await createAuditLog({
+    action: "row_create",
+    actorUserId: user?.id ?? null,
+    departmentId: department.id,
+    tableName: normalizedDepartmentTableName,
+    rowId,
+    summary: `Added a new row to ${tableName}.`,
+    metadata: {
+      columnCount: editableColumns.length,
+    },
+  });
+
   return c.json(
     {
       success: true,
@@ -967,6 +1146,15 @@ tableRoutes.delete("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin,
     );
   }
 
+  await createAuditLog({
+    action: "row_delete",
+    actorUserId: user?.id ?? null,
+    departmentId: department.id,
+    tableName: normalizedDepartmentTableName,
+    rowId,
+    summary: `Deleted row ${rowId} from ${tableName}.`,
+  });
+
   return c.json(
     {
       success: true,
@@ -977,177 +1165,292 @@ tableRoutes.delete("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin,
   );
 });
 
-tableRoutes.post("/api/tables/:tableName/import-image", requireDepartmentAdmin, async (c) => {
-  const reqLogger = c.get("logger");
-  const department = c.get("department");
-  const user = c.get("user");
-  const tableName = c.req.param("tableName");
-  const parsedQuery = TABLE_SCAN_SOURCE_SCHEMA.safeParse(c.req.query());
-  const body = await c.req.parseBody();
-  const maybeFile = body.file;
-  const file = Array.isArray(maybeFile) ? maybeFile[0] : maybeFile;
+tableRoutes.post(
+  "/api/tables/:tableName/import-image/preview",
+  requireDepartmentAdmin,
+  async (c) => {
+    const reqLogger = c.get("logger");
+    const department = c.get("department");
+    const tableName = c.req.param("tableName");
+    const parsedQuery = TABLE_SCAN_SOURCE_SCHEMA.safeParse(c.req.query());
+    const body = await c.req.parseBody();
+    const maybeFile = body.file;
+    const file = Array.isArray(maybeFile) ? maybeFile[0] : maybeFile;
 
-  if (!parsedQuery.success) {
-    return c.json(
-      {
-        success: false,
-        message: "Invalid import source.",
-        data: null,
-      },
-      400,
+    if (!parsedQuery.success) {
+      return c.json(
+        {
+          success: false,
+          message: "Invalid import source.",
+          data: null,
+        },
+        400,
+      );
+    }
+
+    if (!(file instanceof File)) {
+      return c.json(
+        {
+          success: false,
+          message: "Missing file field in multipart request",
+          data: null,
+        },
+        400,
+      );
+    }
+
+    if (!file.type.startsWith("image/")) {
+      return c.json(
+        {
+          success: false,
+          message: "Only image files are supported",
+          data: null,
+        },
+        400,
+      );
+    }
+
+    if (!department) {
+      return c.json(
+        {
+          success: false,
+          message: "Department context is required.",
+          data: null,
+        },
+        400,
+      );
+    }
+
+    const normalizedDepartmentTableName = buildDepartmentTableName(department.slug, tableName);
+
+    if (!normalizedDepartmentTableName) {
+      return c.json(
+        {
+          success: false,
+          message: "Invalid table name.",
+          data: null,
+        },
+        400,
+      );
+    }
+
+    await ensureSystemTableColumns({
+      tableName: normalizedDepartmentTableName,
+      departmentId: department.id,
+      createdByUserId: c.get("user")?.id ?? null,
+    });
+
+    const columns = await getDepartmentTableColumns(normalizedDepartmentTableName);
+
+    if (columns.length === 0) {
+      return c.json(
+        {
+          success: false,
+          message: "Table not found.",
+          data: null,
+        },
+        404,
+      );
+    }
+
+    const editableColumns = columns.filter(
+      (column) => !SYSTEM_TABLE_COLUMN_NAMES.has(column.columnName),
     );
-  }
+    const previewRows = await buildImageImportPreview({
+      file,
+      logger: reqLogger,
+      source: parsedQuery.data.source,
+      tableName,
+      normalizedDepartmentTableName,
+      editableColumns,
+    });
 
-  if (!(file instanceof File)) {
-    return c.json(
-      {
-        success: false,
-        message: "Missing file field in multipart request",
-        data: null,
-      },
-      400,
-    );
-  }
+    if (previewRows.length === 0) {
+      return c.json(
+        {
+          success: true,
+          message: "No matching table rows were found in the uploaded image.",
+          data: {
+            columns: editableColumns,
+            rows: [],
+            summary: {
+              totalRows: 0,
+              duplicateRows: 0,
+              rowsWithMissingRequiredValues: 0,
+              readyRows: 0,
+            },
+          },
+        },
+        200,
+      );
+    }
 
-  if (!file.type.startsWith("image/")) {
-    return c.json(
-      {
-        success: false,
-        message: "Only image files are supported",
-        data: null,
-      },
-      400,
-    );
-  }
-
-  if (!department) {
-    return c.json(
-      {
-        success: false,
-        message: "Department context is required.",
-        data: null,
-      },
-      400,
-    );
-  }
-
-  const normalizedDepartmentTableName = buildDepartmentTableName(department.slug, tableName);
-
-  if (!normalizedDepartmentTableName) {
-    return c.json(
-      {
-        success: false,
-        message: "Invalid table name.",
-        data: null,
-      },
-      400,
-    );
-  }
-
-  await ensureSystemTableColumns({
-    tableName: normalizedDepartmentTableName,
-    departmentId: department.id,
-    createdByUserId: user?.id ?? null,
-  });
-
-  const columns = await getDepartmentTableColumns(normalizedDepartmentTableName);
-
-  if (columns.length === 0) {
-    return c.json(
-      {
-        success: false,
-        message: "Table not found.",
-        data: null,
-      },
-      404,
-    );
-  }
-
-  const editableColumns = columns.filter(
-    (column) => !SYSTEM_TABLE_COLUMN_NAMES.has(column.columnName),
-  );
-  const source = parsedQuery.data.source;
-  const normalizedRows =
-    source === "paddle"
-      ? await (async () => {
-          const scannedTables = await scanTableImageWithPaddle(file, reqLogger);
-          const scanTable = selectBestMatchingScanTable(scannedTables, editableColumns);
-
-          if (scanTable === null) {
-            return [];
-          }
-
-          return buildImportedRowsFromScan(scanTable, editableColumns);
-        })()
-      : (
-          await scanExistingTableRowsWithGemini({
-            file,
-            logger: reqLogger,
-            tableName,
-            columns: editableColumns.map((column) => ({
-              name: column.columnName,
-              dataType: column.dataType,
-              isNullable: column.isNullable,
-            })),
-          })
-        ).map((row) =>
-          editableColumns.map((column, columnIndex) =>
-            normalizeUpdatedCellValue(row[columnIndex] ?? "", column.dataType),
-          ),
-        );
-
-  if (normalizedRows.length === 0) {
     return c.json(
       {
         success: true,
-        message: "No matching table rows were found in the uploaded image.",
+        message: "Import preview generated successfully.",
         data: {
-          insertedRowCount: 0,
+          columns: editableColumns,
+          rows: previewRows,
+          summary: summarizePreviewRows(previewRows),
         },
       },
       200,
     );
-  }
+  },
+);
 
-  if (
-    normalizedRows.some((row) =>
-      editableColumns.some(
-        (column, columnIndex) => !column.isNullable && row[columnIndex] === null,
-      ),
-    )
-  ) {
-    return c.json(
-      {
-        success: false,
-        message: "Required fields are missing in the imported image rows.",
-        data: null,
-      },
-      400,
-    );
-  }
+tableRoutes.post(
+  "/api/tables/:tableName/import-image/commit",
+  requireDepartmentAdmin,
+  async (c) => {
+    const department = c.get("department");
+    const user = c.get("user");
+    const tableName = c.req.param("tableName");
+    const payload = await c.req.json().catch(() => null);
+    const parsedPayload = IMPORT_IMAGE_COMMIT_SCHEMA.safeParse(payload);
 
-  await db.transaction(async (tx) => {
-    await insertEditableRows({
+    if (!parsedPayload.success) {
+      return c.json(
+        {
+          success: false,
+          message: "Invalid import confirmation payload.",
+          data: {
+            issues: parsedPayload.error.issues.map((issue) => ({
+              path: issue.path.join("."),
+              message: issue.message,
+            })),
+          },
+        },
+        400,
+      );
+    }
+
+    if (!department) {
+      return c.json(
+        {
+          success: false,
+          message: "Department context is required.",
+          data: null,
+        },
+        400,
+      );
+    }
+
+    const normalizedDepartmentTableName = buildDepartmentTableName(department.slug, tableName);
+
+    if (!normalizedDepartmentTableName) {
+      return c.json(
+        {
+          success: false,
+          message: "Invalid table name.",
+          data: null,
+        },
+        400,
+      );
+    }
+
+    await ensureSystemTableColumns({
       tableName: normalizedDepartmentTableName,
       departmentId: department.id,
       createdByUserId: user?.id ?? null,
-      editableColumns,
-      rows: normalizedRows,
-      tx,
     });
-  });
 
-  return c.json(
-    {
-      success: true,
-      message: `${normalizedRows.length} row(s) imported successfully.`,
-      data: {
-        insertedRowCount: normalizedRows.length,
+    const columns = await getDepartmentTableColumns(normalizedDepartmentTableName);
+
+    if (columns.length === 0) {
+      return c.json(
+        {
+          success: false,
+          message: "Table not found.",
+          data: null,
+        },
+        404,
+      );
+    }
+
+    const editableColumns = columns.filter(
+      (column) => !SYSTEM_TABLE_COLUMN_NAMES.has(column.columnName),
+    );
+    const normalizedRows = normalizeCommittedImportRows(parsedPayload.data.rows, editableColumns);
+    const rowsWithMissingRequiredValues = normalizedRows
+      .filter((row) => row.missingRequiredColumns.length > 0)
+      .map((row) => ({
+        rowIndex: row.rowIndex,
+        missingRequiredColumns: row.missingRequiredColumns,
+      }));
+
+    if (rowsWithMissingRequiredValues.length > 0) {
+      return c.json(
+        {
+          success: false,
+          message: "Required values are still missing in one or more reviewed rows.",
+          data: {
+            issues: rowsWithMissingRequiredValues,
+          },
+        },
+        400,
+      );
+    }
+
+    const existingSignatures = await getExistingRowSignatures(
+      normalizedDepartmentTableName,
+      editableColumns,
+    );
+    const previewRows = toImportPreviewRows(
+      normalizedRows.map((row) => row.values),
+      editableColumns,
+      existingSignatures,
+    );
+    const rowsToInsert = previewRows
+      .filter((row) => row.duplicateReason === null)
+      .map((row) => editableColumns.map((column) => row.values[column.columnName] ?? null));
+
+    if (rowsToInsert.length > 0) {
+      await db.transaction(async (tx) => {
+        await insertEditableRows({
+          tableName: normalizedDepartmentTableName,
+          departmentId: department.id,
+          createdByUserId: user?.id ?? null,
+          editableColumns,
+          rows: rowsToInsert,
+          tx,
+        });
+      });
+    }
+
+    const skippedDuplicateCount = previewRows.length - rowsToInsert.length;
+
+    await createAuditLog({
+      action: "row_import",
+      actorUserId: user?.id ?? null,
+      departmentId: department.id,
+      tableName: normalizedDepartmentTableName,
+      summary: `Imported ${rowsToInsert.length} row(s) into ${tableName}.`,
+      metadata: {
+        source: parsedPayload.data.source,
+        reviewedRowCount: previewRows.length,
+        insertedRowCount: rowsToInsert.length,
+        skippedDuplicateCount,
       },
-    },
-    201,
-  );
-});
+    });
+
+    return c.json(
+      {
+        success: true,
+        message:
+          skippedDuplicateCount > 0
+            ? `${rowsToInsert.length} row(s) imported. ${skippedDuplicateCount} duplicate row(s) were skipped.`
+            : `${rowsToInsert.length} row(s) imported successfully.`,
+        data: {
+          insertedRowCount: rowsToInsert.length,
+          skippedDuplicateCount,
+        },
+      },
+      200,
+    );
+  },
+);
 
 tableRoutes.post("/api/tables/:tableName/import-csv", requireDepartmentAdmin, async (c) => {
   const department = c.get("department");
@@ -1313,20 +1616,46 @@ tableRoutes.post("/api/tables/:tableName/import-csv", requireDepartmentAdmin, as
     );
   }
 
+  const existingSignatures = await getExistingRowSignatures(
+    normalizedDepartmentTableName,
+    editableColumns,
+  );
+  const previewRows = toImportPreviewRows(normalizedRows, editableColumns, existingSignatures);
+  const rowsToInsert = previewRows
+    .filter((row) => row.duplicateReason === null)
+    .map((row) => editableColumns.map((column) => row.values[column.columnName] ?? null));
   const insertedRowCount = await insertEditableRows({
     tableName: normalizedDepartmentTableName,
     departmentId: department.id,
     createdByUserId: user?.id ?? null,
     editableColumns,
-    rows: normalizedRows,
+    rows: rowsToInsert,
+  });
+  const skippedDuplicateCount = previewRows.length - rowsToInsert.length;
+
+  await createAuditLog({
+    action: "row_import",
+    actorUserId: user?.id ?? null,
+    departmentId: department.id,
+    tableName: normalizedDepartmentTableName,
+    summary: `Imported ${insertedRowCount} CSV row(s) into ${tableName}.`,
+    metadata: {
+      source: "csv",
+      insertedRowCount,
+      skippedDuplicateCount,
+    },
   });
 
   return c.json(
     {
       success: true,
-      message: `${insertedRowCount} row(s) imported successfully from CSV.`,
+      message:
+        skippedDuplicateCount > 0
+          ? `${insertedRowCount} row(s) imported from CSV. ${skippedDuplicateCount} duplicate row(s) were skipped.`
+          : `${insertedRowCount} row(s) imported successfully from CSV.`,
       data: {
         insertedRowCount,
+        skippedDuplicateCount,
       },
     },
     201,
@@ -1719,6 +2048,18 @@ tableRoutes.post("/api/table/create", requireDepartmentAdmin, async (c) => {
     parsed.data.fillData && rowsToInsert.length > 0
       ? `Table created and ${rowsToInsert.length} rows inserted successfully`
       : "Table created successfully";
+
+  await createAuditLog({
+    action: "table_create",
+    actorUserId: user?.id ?? null,
+    departmentId: department.id,
+    tableName: normalizedTableName,
+    summary: `Created table ${normalizedBaseTableName}.`,
+    metadata: {
+      columnCount: normalizedColumns.length,
+      insertedRowCount: parsed.data.fillData ? rowsToInsert.length : 0,
+    },
+  });
 
   return c.json(
     {
