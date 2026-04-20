@@ -74,6 +74,81 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+[data-role-theme="system_admin"] {
+  --primary: oklch(0.457 0.24 277.023);
+  --primary-foreground: oklch(0.962 0.018 272.314);
+  --accent: oklch(0.457 0.24 277.023);
+  --accent-foreground: oklch(0.962 0.018 272.314);
+  --ring: oklch(0.62 0.19 277.023);
+  --sidebar-primary: oklch(0.511 0.262 276.966);
+  --sidebar-primary-foreground: oklch(0.962 0.018 272.314);
+  --chart-1: oklch(0.785 0.115 274.713);
+  --chart-2: oklch(0.585 0.233 277.117);
+  --chart-3: oklch(0.511 0.262 276.966);
+  --chart-4: oklch(0.457 0.24 277.023);
+  --chart-5: oklch(0.398 0.195 277.366);
+}
+
+[data-role-theme="department_admin"] {
+  --primary: oklch(0.768 0.233 130.85);
+  --primary-foreground: oklch(0.145 0 0);
+  --accent: oklch(0.768 0.233 130.85);
+  --accent-foreground: oklch(0.145 0 0);
+  --ring: oklch(0.82 0.18 129.2);
+  --sidebar-primary: oklch(0.706 0.198 131.4);
+  --sidebar-primary-foreground: oklch(0.145 0 0);
+  --chart-1: oklch(0.93 0.09 126.4);
+  --chart-2: oklch(0.86 0.14 128.8);
+  --chart-3: oklch(0.81 0.19 130.2);
+  --chart-4: oklch(0.768 0.233 130.85);
+  --chart-5: oklch(0.706 0.198 131.4);
+}
+
+[data-role-theme="department_staff"] {
+  --primary: oklch(0.852 0.199 91.936);
+  --primary-foreground: oklch(0.145 0 0);
+  --accent: oklch(0.852 0.199 91.936);
+  --accent-foreground: oklch(0.145 0 0);
+  --ring: oklch(0.9 0.14 93.2);
+  --sidebar-primary: oklch(0.79 0.17 89.7);
+  --sidebar-primary-foreground: oklch(0.145 0 0);
+  --chart-1: oklch(0.97 0.05 102.1);
+  --chart-2: oklch(0.93 0.09 98.4);
+  --chart-3: oklch(0.89 0.14 95.2);
+  --chart-4: oklch(0.852 0.199 91.936);
+  --chart-5: oklch(0.79 0.17 89.7);
+}
+
+.dark [data-role-theme="system_admin"] {
+  --primary: oklch(0.585 0.233 277.117);
+  --primary-foreground: oklch(0.962 0.018 272.314);
+  --accent: oklch(0.585 0.233 277.117);
+  --accent-foreground: oklch(0.962 0.018 272.314);
+  --ring: oklch(0.66 0.16 277.117);
+  --sidebar-primary: oklch(0.64 0.19 277.117);
+  --sidebar-primary-foreground: oklch(0.145 0 0);
+}
+
+.dark [data-role-theme="department_admin"] {
+  --primary: oklch(0.84 0.19 128.4);
+  --primary-foreground: oklch(0.145 0 0);
+  --accent: oklch(0.84 0.19 128.4);
+  --accent-foreground: oklch(0.145 0 0);
+  --ring: oklch(0.88 0.14 128.8);
+  --sidebar-primary: oklch(0.79 0.17 129.4);
+  --sidebar-primary-foreground: oklch(0.145 0 0);
+}
+
+.dark [data-role-theme="department_staff"] {
+  --primary: oklch(0.88 0.17 94.8);
+  --primary-foreground: oklch(0.145 0 0);
+  --accent: oklch(0.88 0.17 94.8);
+  --accent-foreground: oklch(0.145 0 0);
+  --ring: oklch(0.93 0.11 96.3);
+  --sidebar-primary: oklch(0.84 0.15 93.6);
+  --sidebar-primary-foreground: oklch(0.145 0 0);
+}
+
 @theme inline {
   --font-sans: "Oxanium Variable", sans-serif;
   --font-heading: var(--font-sans);

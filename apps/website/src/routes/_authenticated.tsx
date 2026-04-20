@@ -104,5 +104,13 @@ export const Route = createFileRoute("/_authenticated")({
 });
 
 function RouteComponent() {
-  return <Outlet />;
+  const { accessContext } = Route.useRouteContext();
+
+  const roleTheme = accessContext.role === "unassigned" ? undefined : accessContext.role;
+
+  return (
+    <div data-role-theme={roleTheme} className="min-h-svh">
+      <Outlet />
+    </div>
+  );
 }

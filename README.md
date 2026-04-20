@@ -34,6 +34,7 @@ A full-stack document digitization system that converts paper tables from photos
 - Export to `CSV`, `JSON`, and `XLSX`
 - Audit logging for table creation and row-level changes
 - Admin-only logs page for reviewing system activity
+- Role-based dashboard theme colors
 
 ## How It Works
 
