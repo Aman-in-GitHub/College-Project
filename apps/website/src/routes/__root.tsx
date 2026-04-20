@@ -40,7 +40,7 @@ function RootLayout() {
   return (
     <>
       <HeadContent />
-      <ProgressProvider color="#432dd7" height="4px">
+      <ProgressProvider color="var(--primary)" height="4px">
         <NavigationProgress />
         <Link to="/" className="flex w-full items-center justify-center">
           <img src="/favicon.svg" alt="College Project Logo" className="size-32" />
