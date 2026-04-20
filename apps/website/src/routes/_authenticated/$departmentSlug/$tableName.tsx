@@ -135,32 +135,6 @@ type DeleteRowResponse = {
   data: null;
 };
 
-type DbColumnType = "text" | "integer" | "numeric" | "boolean" | "date" | "time" | "timestamp";
-
-type ScannedColumn = {
-  name: string;
-  inferredType: DbColumnType;
-  values: string[];
-};
-
-type ScanTable = {
-  columns: ScannedColumn[];
-};
-
-type ScanResponse = {
-  success: boolean;
-  message: string;
-  data: {
-    department: {
-      id: string;
-      name: string;
-      slug: string;
-    } | null;
-    tables: ScanTable[];
-    columnTypes: DbColumnType[];
-  };
-};
-
 type ImportSource = "paddle" | "gemini";
 
 type EditableTableCellProps = {
@@ -264,17 +238,6 @@ function isDeleteRowResponse(value: unknown): value is DeleteRowResponse {
     typeof value.success === "boolean" &&
     typeof value.message === "string" &&
     value.data === null
-  );
-}
-
-function isScanResponse(value: unknown): value is ScanResponse {
-  return (
-    isRecord(value) &&
-    typeof value.success === "boolean" &&
-    typeof value.message === "string" &&
-    isRecord(value.data) &&
-    Array.isArray(value.data.tables) &&
-    Array.isArray(value.data.columnTypes)
   );
 }
 
@@ -476,25 +439,12 @@ async function importTableRowsFromImage(params: {
   tableName: string;
   file: File;
   source: ImportSource;
-  columns: TableColumn[];
-}): Promise<ImportRowsResponse> {
-  if (params.source === "gemini") {
-    return importTableRowsFromGemini(params);
-  }
-
-  return importTableRowsFromFastApi(params);
-}
-
-async function importTableRowsFromGemini(params: {
-  departmentSlug: string;
-  tableName: string;
-  file: File;
 }): Promise<ImportRowsResponse> {
   const formData = new FormData();
   formData.append("file", params.file, params.file.name);
 
   const { response, body } = await fetchApiJson(
-    `${env.VITE_SERVER_URL}/api/tables/${encodeURIComponent(params.tableName)}/import-image`,
+    `${env.VITE_SERVER_URL}/api/tables/${encodeURIComponent(params.tableName)}/import-image?source=${encodeURIComponent(params.source)}`,
     {
       method: "POST",
       headers: {
@@ -517,151 +467,6 @@ async function importTableRowsFromGemini(params: {
   }
 
   return body;
-}
-
-function normalizeImportColumnName(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_")
-    .replace(/[^a-z0-9_]/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-function getScanRows(columns: ScannedColumn[]): string[][] {
-  const rowCount = columns.reduce(
-    (maxCount, column) => Math.max(maxCount, column.values.length),
-    0,
-  );
-
-  return Array.from({ length: rowCount }, (_, rowIndex) =>
-    columns.map((column) => column.values[rowIndex] ?? ""),
-  );
-}
-
-function selectBestMatchingScanTable(
-  tables: ScanTable[],
-  columns: TableColumn[],
-): ScanTable | null {
-  if (tables.length === 0) {
-    return null;
-  }
-
-  const editableColumnNames = new Set(
-    columns
-      .filter((column) => column.columnName !== "id")
-      .map((column) => normalizeImportColumnName(column.columnName)),
-  );
-
-  const rankedTables = tables.map((table) => {
-    const matchCount = table.columns.reduce((count, column) => {
-      return count + (editableColumnNames.has(normalizeImportColumnName(column.name)) ? 1 : 0);
-    }, 0);
-
-    return {
-      table,
-      matchCount,
-    };
-  });
-
-  rankedTables.sort((left, right) => right.matchCount - left.matchCount);
-
-  return rankedTables[0]?.table ?? null;
-}
-
-function buildImportedRowsFromScan(scanTable: ScanTable, columns: TableColumn[]) {
-  const editableColumns = columns.filter((column) => column.columnName !== "id");
-  const scannedColumnMap = new Map(
-    scanTable.columns.map((column) => [normalizeImportColumnName(column.name), column]),
-  );
-  const scanRows = getScanRows(scanTable.columns);
-
-  return scanRows
-    .map((_, rowIndex) => {
-      const values = editableColumns.reduce<Record<string, string | null>>((result, column) => {
-        const scannedColumn = scannedColumnMap.get(normalizeImportColumnName(column.columnName));
-        const nextValue = scannedColumn?.values[rowIndex]?.trim() ?? "";
-
-        result[column.columnName] = nextValue.length > 0 ? nextValue : null;
-        return result;
-      }, {});
-
-      return values;
-    })
-    .filter((row) => Object.values(row).some((value) => value !== null && value.trim().length > 0));
-}
-
-async function importTableRowsFromFastApi(params: {
-  departmentSlug: string;
-  tableName: string;
-  file: File;
-  columns: TableColumn[];
-}): Promise<ImportRowsResponse> {
-  const formData = new FormData();
-  formData.append("file", params.file, params.file.name);
-
-  const { response, body } = await fetchApiJson(`${env.VITE_FASTAPI_URL}/api/table/scan`, {
-    method: "POST",
-    credentials: "omit",
-    body: formData,
-  });
-
-  if (!response.ok) {
-    if (isRecord(body) && typeof body.message === "string") {
-      throw new Error(body.message);
-    }
-
-    if (isRecord(body) && typeof body.detail === "string") {
-      throw new Error(body.detail);
-    }
-
-    throw new Error("Failed to scan rows from image.");
-  }
-
-  if (!isScanResponse(body)) {
-    throw new Error("Invalid scan response.");
-  }
-
-  const scanTable = selectBestMatchingScanTable(body.data.tables, params.columns);
-
-  if (scanTable === null) {
-    return {
-      success: true,
-      message: "No matching table rows were found in the uploaded image.",
-      data: {
-        insertedRowCount: 0,
-      },
-    };
-  }
-
-  const rowsToInsert = buildImportedRowsFromScan(scanTable, params.columns);
-
-  if (rowsToInsert.length === 0) {
-    return {
-      success: true,
-      message: "No matching table rows were found in the uploaded image.",
-      data: {
-        insertedRowCount: 0,
-      },
-    };
-  }
-
-  for (const values of rowsToInsert) {
-    await addTableRow({
-      departmentSlug: params.departmentSlug,
-      tableName: params.tableName,
-      values,
-    });
-  }
-
-  return {
-    success: true,
-    message: `${rowsToInsert.length} row(s) imported successfully.`,
-    data: {
-      insertedRowCount: rowsToInsert.length,
-    },
-  };
 }
 
 async function importTableRowsFromCsv(params: {
@@ -1128,7 +933,6 @@ function RouteComponent() {
       tableName: params.tableName,
       file: selectedImportFile,
       source,
-      columns: tableColumns,
     });
   }
 

@@ -17,7 +17,7 @@ async function confirmReset() {
 
   console.log("This will DELETE all data in the public schema.");
 
-  const answer = prompt(`Type "${RESET_SENTINEL}" to continue:`);
+  const answer = prompt(`\nType "${RESET_SENTINEL}" to continue:`);
 
   return (answer ?? "").trim().toLowerCase() === RESET_SENTINEL;
 }
@@ -44,26 +44,26 @@ async function reset() {
   const confirmed = await confirmReset();
 
   if (!confirmed) {
-    console.log("Reset cancelled.");
+    console.log("\nReset cancelled.");
     process.exit(0);
   }
 
-  console.log("Starting database reset...");
-  console.log("Dropping and recreating public schema...");
+  console.log("\nStarting database reset...");
+  console.log("\nDropping and recreating public schema...");
 
   await resetSchema();
 
-  console.log("Clearing Redis cache...");
+  console.log("\nClearing Redis cache...");
   await resetRedis();
 
-  console.log("Running migrations...");
+  console.log("\nRunning migrations...");
   await runMigrations();
-  console.log("Database reset complete.");
+  console.log("\nDatabase reset complete.");
 }
 
 reset()
   .catch((err) => {
-    console.error("Database reset failed.");
+    console.error("\nDatabase reset failed.");
     console.error(err);
     process.exit(1);
   })

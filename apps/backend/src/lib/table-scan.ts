@@ -73,8 +73,28 @@ const extractedExistingTableRowsSchema = z.object({
     ),
 });
 
+const paddleColumnSchema = z.object({
+  name: z.string(),
+  inferredType: dbColumnTypeSchema,
+  values: z.array(z.string()),
+});
+
+const paddleTableSchema = z.object({
+  columns: z.array(paddleColumnSchema),
+});
+
 const google = createGoogleGenerativeAI({
   apiKey: env.GEMINI_API_KEY,
+});
+
+const fastApiScanResponseSchema = z.object({
+  success: z.boolean(),
+  message: z.string(),
+  data: z.object({
+    department: z.null(),
+    tables: z.array(paddleTableSchema),
+    columnTypes: z.array(dbColumnTypeSchema),
+  }),
 });
 
 function normalizeHeader(name: string, index: number): string {
@@ -288,4 +308,65 @@ export async function scanExistingTableRowsWithGemini(params: {
       }),
     )
     .filter((row) => row.some((value) => value.length > 0));
+}
+
+export async function scanTableImageWithPaddle(
+  file: File,
+  logger: Logger,
+): Promise<ScannedTable[]> {
+  const formData = new FormData();
+  formData.append("file", file, file.name || "table-image");
+
+  const response = await fetch(`${env.FASTAPI_URL}/api/table/scan`, {
+    method: "POST",
+    headers: {
+      "x-internal-token": env.FASTAPI_INTERNAL_TOKEN,
+    },
+    body: formData,
+  });
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    if (body && typeof body === "object" && "detail" in body && typeof body.detail === "string") {
+      throw new Error(body.detail);
+    }
+
+    throw new Error("PaddleOCR scan failed.");
+  }
+
+  const parsedResponse = fastApiScanResponseSchema.safeParse(body);
+
+  if (!parsedResponse.success) {
+    logger.error(
+      {
+        issues: parsedResponse.error.issues,
+      },
+      "PaddleOCR scan returned an invalid response",
+    );
+    throw new Error("PaddleOCR scan returned an invalid response.");
+  }
+
+  logger.info(
+    {
+      tableCount: parsedResponse.data.data.tables.length,
+      detectedColumns: parsedResponse.data.data.tables.map((table, tableIndex) => ({
+        table: tableIndex + 1,
+        columns: table.columns.map((column) => ({
+          rawName: column.name,
+          inferredType: column.inferredType,
+        })),
+      })),
+    },
+    "PaddleOCR table scan complete",
+  );
+
+  return parsedResponse.data.data.tables
+    .map((table) => ({
+      columns: table.columns.map((column, index) => ({
+        name: normalizeHeader(column.name, index),
+        inferredType: column.inferredType,
+        values: column.values.map((value) => value.trim()),
+      })),
+    }))
+    .filter((table) => table.columns.length > 0);
 }

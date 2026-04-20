@@ -9,6 +9,8 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "production"]),
   DATABASE_URL: z.url(),
   CLIENT_URL: z.url(),
+  FASTAPI_URL: z.url(),
+  FASTAPI_INTERNAL_TOKEN: z.string().min(1),
   REDIS_URL: z.url(),
   BETTER_AUTH_URL: z.url(),
   BETTER_AUTH_SECRET: z.string().min(1),

@@ -4,10 +4,15 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 
 import type { AppEnv } from "@/types/index.ts";
+import type { ScannedTable } from "@/types/table.ts";
 
 import { db, postgresClient } from "@/db/index.ts";
 import { DB_COLUMN_TYPES, PG_TYPE_BY_DB_TYPE } from "@/lib/constants.ts";
-import { scanExistingTableRowsWithGemini, scanTableImageWithGemini } from "@/lib/table-scan";
+import {
+  scanExistingTableRowsWithGemini,
+  scanTableImageWithGemini,
+  scanTableImageWithPaddle,
+} from "@/lib/table-scan";
 import { getIdentifierValidationMessage, normalizeIdentifier, quoteIdentifier } from "@/lib/utils";
 import { requireDepartmentAdmin, requireDepartmentStaff } from "@/middlewares/auth.ts";
 
@@ -39,6 +44,10 @@ const UPDATE_TABLE_ROW_SCHEMA = z.object({
 
 const CREATE_TABLE_ROW_SCHEMA = z.object({
   values: z.record(z.string(), z.string().nullable()),
+});
+
+const TABLE_SCAN_SOURCE_SCHEMA = z.object({
+  source: z.enum(["gemini", "paddle"]).default("gemini"),
 });
 
 type NormalizedColumn = {
@@ -351,6 +360,7 @@ async function insertEditableRows(params: {
   createdByUserId: string | null;
   editableColumns: TableColumn[];
   rows: Array<Array<string | null>>;
+  tx?: DbTransaction;
 }): Promise<number> {
   if (params.rows.length === 0) {
     return 0;
@@ -375,13 +385,79 @@ async function insertEditableRows(params: {
     ];
   });
 
-  await postgresClient.unsafe(
-    `INSERT INTO ${quoteTableIdentifier(params.tableName)} (${columnIdentifiers.join(", ")}) VALUES ${rowValues
-      .map((row) => `(${row.join(", ")})`)
-      .join(", ")}`,
-  );
+  const insertStatement = `INSERT INTO ${quoteTableIdentifier(params.tableName)} (${columnIdentifiers.join(", ")}) VALUES ${rowValues
+    .map((row) => `(${row.join(", ")})`)
+    .join(", ")}`;
+
+  if (params.tx) {
+    await params.tx.execute(sql.raw(insertStatement));
+  } else {
+    await postgresClient.unsafe(insertStatement);
+  }
 
   return params.rows.length;
+}
+
+function normalizeImportColumnName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function getScanRows(columns: ScannedTable["columns"]): string[][] {
+  const rowCount = columns.reduce(
+    (maxCount, column) => Math.max(maxCount, column.values.length),
+    0,
+  );
+
+  return Array.from({ length: rowCount }, (_, rowIndex) =>
+    columns.map((column) => column.values[rowIndex] ?? ""),
+  );
+}
+
+function selectBestMatchingScanTable(
+  tables: ScannedTable[],
+  columns: TableColumn[],
+): ScannedTable | null {
+  if (tables.length === 0) {
+    return null;
+  }
+
+  const editableColumnNames = new Set(
+    columns.map((column) => normalizeImportColumnName(column.columnName)),
+  );
+  const rankedTables = tables.map((table) => ({
+    table,
+    matchCount: table.columns.reduce((count, column) => {
+      return count + (editableColumnNames.has(normalizeImportColumnName(column.name)) ? 1 : 0);
+    }, 0),
+  }));
+
+  rankedTables.sort((left, right) => right.matchCount - left.matchCount);
+
+  return rankedTables[0]?.table ?? null;
+}
+
+function buildImportedRowsFromScan(scanTable: ScannedTable, columns: TableColumn[]) {
+  const scannedColumnMap = new Map(
+    scanTable.columns.map((column) => [normalizeImportColumnName(column.name), column]),
+  );
+  const scanRows = getScanRows(scanTable.columns);
+
+  return scanRows
+    .map((_, rowIndex) => {
+      return columns.map((column) => {
+        const scannedColumn = scannedColumnMap.get(normalizeImportColumnName(column.columnName));
+        const nextValue = scannedColumn?.values[rowIndex]?.trim() ?? "";
+
+        return normalizeUpdatedCellValue(nextValue.length > 0 ? nextValue : null, column.dataType);
+      });
+    })
+    .filter((row) => row.some((value) => value !== null));
 }
 
 export const tableRoutes = new Hono<AppEnv>();
@@ -906,9 +982,21 @@ tableRoutes.post("/api/tables/:tableName/import-image", requireDepartmentAdmin, 
   const department = c.get("department");
   const user = c.get("user");
   const tableName = c.req.param("tableName");
+  const parsedQuery = TABLE_SCAN_SOURCE_SCHEMA.safeParse(c.req.query());
   const body = await c.req.parseBody();
   const maybeFile = body.file;
   const file = Array.isArray(maybeFile) ? maybeFile[0] : maybeFile;
+
+  if (!parsedQuery.success) {
+    return c.json(
+      {
+        success: false,
+        message: "Invalid import source.",
+        data: null,
+      },
+      400,
+    );
+  }
 
   if (!(file instanceof File)) {
     return c.json(
@@ -978,18 +1066,37 @@ tableRoutes.post("/api/tables/:tableName/import-image", requireDepartmentAdmin, 
   const editableColumns = columns.filter(
     (column) => !SYSTEM_TABLE_COLUMN_NAMES.has(column.columnName),
   );
-  const scannedRows = await scanExistingTableRowsWithGemini({
-    file,
-    logger: reqLogger,
-    tableName,
-    columns: editableColumns.map((column) => ({
-      name: column.columnName,
-      dataType: column.dataType,
-      isNullable: column.isNullable,
-    })),
-  });
+  const source = parsedQuery.data.source;
+  const normalizedRows =
+    source === "paddle"
+      ? await (async () => {
+          const scannedTables = await scanTableImageWithPaddle(file, reqLogger);
+          const scanTable = selectBestMatchingScanTable(scannedTables, editableColumns);
 
-  if (scannedRows.length === 0) {
+          if (scanTable === null) {
+            return [];
+          }
+
+          return buildImportedRowsFromScan(scanTable, editableColumns);
+        })()
+      : (
+          await scanExistingTableRowsWithGemini({
+            file,
+            logger: reqLogger,
+            tableName,
+            columns: editableColumns.map((column) => ({
+              name: column.columnName,
+              dataType: column.dataType,
+              isNullable: column.isNullable,
+            })),
+          })
+        ).map((row) =>
+          editableColumns.map((column, columnIndex) =>
+            normalizeUpdatedCellValue(row[columnIndex] ?? "", column.dataType),
+          ),
+        );
+
+  if (normalizedRows.length === 0) {
     return c.json(
       {
         success: true,
@@ -1003,11 +1110,9 @@ tableRoutes.post("/api/tables/:tableName/import-image", requireDepartmentAdmin, 
   }
 
   if (
-    scannedRows.some((row) =>
+    normalizedRows.some((row) =>
       editableColumns.some(
-        (column, columnIndex) =>
-          !column.isNullable &&
-          normalizeUpdatedCellValue(row[columnIndex] ?? "", column.dataType) === null,
+        (column, columnIndex) => !column.isNullable && row[columnIndex] === null,
       ),
     )
   ) {
@@ -1021,26 +1126,23 @@ tableRoutes.post("/api/tables/:tableName/import-image", requireDepartmentAdmin, 
     );
   }
 
-  const normalizedRows = scannedRows.map((row) =>
-    editableColumns.map((column, columnIndex) =>
-      normalizeUpdatedCellValue(row[columnIndex] ?? "", column.dataType),
-    ),
-  );
-
-  await insertEditableRows({
-    tableName: normalizedDepartmentTableName,
-    departmentId: department.id,
-    createdByUserId: user?.id ?? null,
-    editableColumns,
-    rows: normalizedRows,
+  await db.transaction(async (tx) => {
+    await insertEditableRows({
+      tableName: normalizedDepartmentTableName,
+      departmentId: department.id,
+      createdByUserId: user?.id ?? null,
+      editableColumns,
+      rows: normalizedRows,
+      tx,
+    });
   });
 
   return c.json(
     {
       success: true,
-      message: `${scannedRows.length} row(s) imported successfully.`,
+      message: `${normalizedRows.length} row(s) imported successfully.`,
       data: {
-        insertedRowCount: scannedRows.length,
+        insertedRowCount: normalizedRows.length,
       },
     },
     201,
@@ -1234,9 +1336,21 @@ tableRoutes.post("/api/tables/:tableName/import-csv", requireDepartmentAdmin, as
 tableRoutes.post("/api/table/scan", requireDepartmentAdmin, async (c) => {
   const reqLogger = c.get("logger");
   const department = c.get("department");
+  const parsedQuery = TABLE_SCAN_SOURCE_SCHEMA.safeParse(c.req.query());
   const body = await c.req.parseBody();
   const maybeFile = body.file;
   const file = Array.isArray(maybeFile) ? maybeFile[0] : maybeFile;
+
+  if (!parsedQuery.success) {
+    return c.json(
+      {
+        success: false,
+        message: "Invalid scan source.",
+        data: null,
+      },
+      400,
+    );
+  }
 
   reqLogger.info(
     {
@@ -1273,7 +1387,10 @@ tableRoutes.post("/api/table/scan", requireDepartmentAdmin, async (c) => {
     );
   }
 
-  const tables = await scanTableImageWithGemini(file, reqLogger);
+  const tables =
+    parsedQuery.data.source === "paddle"
+      ? await scanTableImageWithPaddle(file, reqLogger)
+      : await scanTableImageWithGemini(file, reqLogger);
 
   reqLogger.info(
     {

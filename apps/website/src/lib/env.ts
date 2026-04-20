@@ -6,7 +6,6 @@ const rawEnv = Object.fromEntries(
 
 const EnvSchema = z.object({
   VITE_SERVER_URL: z.url(),
-  VITE_FASTAPI_URL: z.url(),
 });
 
 export const env = EnvSchema.parse(rawEnv);

@@ -1,9 +1,11 @@
 import {
+  BankIcon,
   CameraIcon,
   EraserIcon,
   HouseLineIcon,
   MagnifyingGlassIcon,
   PlusIcon,
+  ProhibitIcon,
   SignOutIcon,
   TableIcon,
   TrashIcon,
@@ -407,20 +409,16 @@ async function scanTableRequest({
 }): Promise<ScanResponse> {
   const formData = new FormData();
   formData.append("file", file, file.name);
-  const isGeminiScan = source === "gemini";
-  const scanUrl = isGeminiScan
-    ? `${env.VITE_SERVER_URL}/api/table/scan`
-    : `${env.VITE_FASTAPI_URL}/api/table/scan`;
-  const { response, body } = await fetchApiJson(scanUrl, {
-    method: "POST",
-    headers: isGeminiScan
-      ? {
-          "x-department-slug": departmentSlug,
-        }
-      : undefined,
-    credentials: isGeminiScan ? "include" : "omit",
-    body: formData,
-  });
+  const { response, body } = await fetchApiJson(
+    `${env.VITE_SERVER_URL}/api/table/scan?source=${encodeURIComponent(source)}`,
+    {
+      method: "POST",
+      headers: {
+        "x-department-slug": departmentSlug,
+      },
+      body: formData,
+    },
+  );
 
   if (!response.ok) {
     if (isRecord(body) && typeof body.message === "string") {
@@ -994,6 +992,7 @@ function RouteComponent() {
                                 : void banUserMutation.mutateAsync(item.user.id)
                             }
                           >
+                            <ProhibitIcon className="mb-1 size-5" weight="duotone" />
                             {item.user.isBanned
                               ? unbanUserMutation.isPending
                                 ? "Unbanning..."

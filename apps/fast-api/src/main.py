@@ -8,13 +8,16 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Literal, TypedDict
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from paddleocr import TableRecognitionPipelineV2
 from PIL import Image, UnidentifiedImageError
 
 os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+
+CLIENT_URL = os.getenv("CLIENT_URL", "http://localhost:5173")
+INTERNAL_TOKEN = os.getenv("FASTAPI_INTERNAL_TOKEN")
 
 logger = logging.getLogger("college_project.fastapi_service")
 logger.setLevel(logging.INFO)
@@ -63,7 +66,7 @@ class ParsedTable(TypedDict):
 app = FastAPI(title="PaddleOCR Table Scan Service")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[CLIENT_URL],
     allow_methods=["POST", "OPTIONS"],
     allow_headers=["*"],
 )
@@ -440,7 +443,17 @@ def extract_scanned_tables(file_bytes: bytes) -> list[dict[str, object]]:
 
 
 @app.post("/api/table/scan")
-async def scan_table(file: UploadFile = File(...)) -> dict[str, object]:
+async def scan_table(
+    file: UploadFile = File(...), x_internal_token: str | None = Header(default=None)
+) -> dict[str, object]:
+    if INTERNAL_TOKEN is None or INTERNAL_TOKEN.strip() == "":
+        logger.error("FASTAPI_INTERNAL_TOKEN is not configured")
+        raise HTTPException(status_code=500, detail="OCR service is not configured.")
+
+    if x_internal_token != INTERNAL_TOKEN:
+        logger.warning("Rejected OCR request with invalid internal token")
+        raise HTTPException(status_code=401, detail="Unauthorized OCR request.")
+
     logger.info(
         "Received table scan request filename=%s content_type=%s",
         file.filename,

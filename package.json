@@ -7,8 +7,8 @@
   "scripts": {
     "clean": "docker compose down && for d in .venv .ruff_cache .tanstack dist node_modules pnpm-lock.yaml uv.lock; do find . -name \"$d\" | xargs -r rm -rf; done",
     "dev": "docker compose up -d && pnpm -r --parallel --if-present run dev",
-    "format": "oxfmt",
-    "lint": "oxlint",
+    "format": "oxfmt && uvx ruff format apps/fast-api",
+    "lint": "oxlint && uvx ruff check apps/fast-api",
     "update": "pnpm -r update",
     "update:latest": "pnpm -r update --latest"
   },
@@ -16,7 +16,7 @@
     "lefthook": "^2.1.6",
     "oxfmt": "^0.45.0",
     "oxlint": "^1.60.0",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.3"
   },
   "packageManager": "pnpm@10.33.0"
 }
