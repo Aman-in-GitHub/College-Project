@@ -408,6 +408,7 @@ function EditableTableCell({
   return (
     <Input
       value={draftValue ?? formatCellValue(originalValue)}
+      className="border-t-0 border-r-0 border-b border-l-0 border-transparent hover:border-primary focus:border-primary"
       onChange={(event) => {
         onDraftChange(rowId, columnName, event.target.value, originalValue);
       }}
@@ -1163,10 +1164,10 @@ function RouteComponent() {
               const isDeletingCurrentRow = deletingRowId === row.original.id;
 
               return (
-                <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
                   <Button
                     size="sm"
-                    className="w-20"
+                    className="w-10"
                     disabled={!hasChanges || updateRowMutation.isPending || isDeletingCurrentRow}
                     onClick={() => handleSaveRow(row.original.id, rowDraft)}
                   >
@@ -1175,7 +1176,7 @@ function RouteComponent() {
                   <Button
                     size="sm"
                     variant="destructive"
-                    className="w-20"
+                    className="w-10"
                     disabled={deleteRowMutation.isPending || updateRowMutation.isPending}
                     onClick={() => handleDeleteRow(row.original.id)}
                   >
@@ -1554,7 +1555,7 @@ function RouteComponent() {
                         <TableCell>
                           <Button
                             size="sm"
-                            className="w-20"
+                            className="w-22"
                             disabled={!canAddRow || addRowMutation.isPending}
                             onClick={handleAddRow}
                           >
