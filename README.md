@@ -31,7 +31,7 @@ flowchart LR
   website --> user
   backend --> postgres[("PostgreSQL")]
   backend --> redis[("Redis")]
-  backend --> fastapi["PaddleOCR Service"]
+  backend --> fastapi["PaddleOCR"]
   backend --> gemini["Gemini"]
 ```
 
@@ -39,7 +39,7 @@ flowchart LR
 - `Backend API` - Bun/Hono service for auth, roles, imports, dynamic tables, and audit logs.
 - `PostgreSQL` - stores users, departments, generated tables, row data, and logs.
 - `Redis` - stores rate-limit state.
-- `PaddleOCR Service` - FastAPI microservice for image-based table recognition.
+- `PaddleOCR` - FastAPI microservice for image-based table recognition.
 - `Gemini` - AI OCR path for table extraction and imports.
 
 ## Features
@@ -122,8 +122,6 @@ pnpm update
 
 ## Team
 
-Aman Chand
-
-Raksha Karn
-
-Aayusha Dhakal
+- [Aman Chand](https://github.com/Aman-in-GitHub)
+- [Raksha Karn](https://github.com/Raksha-Karn)
+- [Aayusha Dhakal](https://github.com/signup)

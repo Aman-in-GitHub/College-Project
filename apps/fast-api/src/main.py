@@ -41,6 +41,9 @@ SUPPORTED_CONTENT_TYPES = {
     "image/bmp",
 }
 SUPPORTED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".tiff", ".tif", ".bmp"}
+PHOTO_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+PHOTO_UPLOAD_MAX_MB = PHOTO_UPLOAD_MAX_BYTES // 1024 // 1024
+UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 RESERVED_IDENTIFIERS = {
     "select",
     "from",
@@ -113,6 +116,27 @@ def write_pipeline_input(input_path: Path, file_bytes: bytes) -> None:
             converted_image.save(input_path, format="PNG")
     except UnidentifiedImageError as exc:
         raise ValueError("Uploaded file is not a readable image.") from exc
+
+
+async def read_limited_upload(file: UploadFile) -> bytes:
+    file_bytes = bytearray()
+
+    while chunk := await file.read(UPLOAD_READ_CHUNK_BYTES):
+        file_bytes.extend(chunk)
+
+        if len(file_bytes) > PHOTO_UPLOAD_MAX_BYTES:
+            logger.warning(
+                "Rejected oversized upload filename=%s size=%s max_size=%s",
+                file.filename,
+                len(file_bytes),
+                PHOTO_UPLOAD_MAX_BYTES,
+            )
+            raise HTTPException(
+                status_code=413,
+                detail=f"Photo uploads must be {PHOTO_UPLOAD_MAX_MB}MB or smaller.",
+            )
+
+    return bytes(file_bytes)
 
 
 class TableHtmlParser(HTMLParser):
@@ -500,7 +524,7 @@ async def scan_table(
         )
 
     try:
-        file_bytes = await file.read()
+        file_bytes = await read_limited_upload(file)
     finally:
         await file.close()
 

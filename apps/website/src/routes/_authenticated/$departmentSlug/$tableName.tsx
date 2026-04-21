@@ -70,6 +70,7 @@ export const Route = createFileRoute("/_authenticated/$departmentSlug/$tableName
 });
 
 const authenticatedRoute = getRouteApi("/_authenticated");
+const MAX_IMPORT_IMAGE_FILES = 5;
 
 type TableValue = string | number | boolean | null;
 
@@ -149,6 +150,14 @@ type ImportPreviewResponse = {
       rowsWithMissingRequiredValues: number;
       readyRows: number;
     };
+  };
+};
+
+type ImportPreviewBatchResponse = {
+  message: string;
+  data: {
+    columns: TableColumn[];
+    rows: ImportPreviewRow[];
   };
 };
 
@@ -560,6 +569,42 @@ async function previewImageImport(params: {
   return body;
 }
 
+async function previewImageImportBatch(params: {
+  departmentSlug: string;
+  tableName: string;
+  files: File[];
+  source: ImportSource;
+}): Promise<ImportPreviewBatchResponse> {
+  const rows: ImportPreviewRow[] = [];
+  let columns: TableColumn[] = [];
+
+  for (const file of params.files) {
+    const preview = await previewImageImport({
+      departmentSlug: params.departmentSlug,
+      tableName: params.tableName,
+      file,
+      source: params.source,
+    });
+
+    if (columns.length === 0) {
+      columns = preview.data.columns;
+    }
+
+    rows.push(...preview.data.rows);
+  }
+
+  return {
+    message:
+      params.files.length === 1
+        ? "Image scanned. Review extracted rows before saving."
+        : `${params.files.length} images scanned. Review extracted rows before saving.`,
+    data: {
+      columns,
+      rows,
+    },
+  };
+}
+
 async function confirmImageImport(params: {
   departmentSlug: string;
   tableName: string;
@@ -676,8 +721,8 @@ function RouteComponent() {
   const [searchTerm, setSearchTerm] = useState("");
   const [editedRows, setEditedRows] = useState<Record<string, Record<string, string | null>>>({});
   const [newRowValues, setNewRowValues] = useState<Record<string, string>>({});
-  const [selectedImportFile, setSelectedImportFile] = useState<File | null>(null);
-  const [importPreviewUrl, setImportPreviewUrl] = useState<string | null>(null);
+  const [selectedImportFiles, setSelectedImportFiles] = useState<File[]>([]);
+  const [importPreviewUrls, setImportPreviewUrls] = useState<string[]>([]);
   const [importPreviewRows, setImportPreviewRows] = useState<ImportPreviewRow[]>([]);
   const [importPreviewSource, setImportPreviewSource] = useState<ImportSource | null>(null);
   const [isExportingAll, setIsExportingAll] = useState(false);
@@ -692,18 +737,22 @@ function RouteComponent() {
   editedRowsRef.current = editedRows;
 
   useEffect(() => {
-    if (!selectedImportFile) {
-      setImportPreviewUrl(null);
+    if (selectedImportFiles.length === 0) {
+      setImportPreviewUrls([]);
       return;
     }
 
-    const objectUrl = URL.createObjectURL(selectedImportFile);
-    setImportPreviewUrl(objectUrl);
+    const objectUrls = selectedImportFiles
+      .filter((file) => file.type.startsWith("image/"))
+      .map((file) => URL.createObjectURL(file));
+    setImportPreviewUrls(objectUrls);
 
     return () => {
-      URL.revokeObjectURL(objectUrl);
+      for (const objectUrl of objectUrls) {
+        URL.revokeObjectURL(objectUrl);
+      }
     };
-  }, [selectedImportFile]);
+  }, [selectedImportFiles]);
 
   const tableQuery = useQuery({
     queryKey: [...tableQueryKey, debouncedSearchTerm, pagination.pageIndex, pagination.pageSize],
@@ -747,7 +796,7 @@ function RouteComponent() {
     },
   });
   const importRowsMutation = useMutation({
-    mutationFn: previewImageImport,
+    mutationFn: previewImageImportBatch,
     onSuccess: (payload) => {
       setActiveImportSource(null);
       setImportPreviewRows(reconcileImportPreviewRows(payload.data.rows, payload.data.columns));
@@ -762,7 +811,7 @@ function RouteComponent() {
     mutationFn: confirmImageImport,
     onSuccess: (payload) => {
       showSuccessToast(payload.message);
-      setSelectedImportFile(null);
+      setSelectedImportFiles([]);
       setImportPreviewRows([]);
       setImportPreviewSource(null);
 
@@ -790,7 +839,7 @@ function RouteComponent() {
     mutationFn: importTableRowsFromCsv,
     onSuccess: (payload) => {
       showSuccessToast(payload.message);
-      setSelectedImportFile(null);
+      setSelectedImportFiles([]);
 
       if (importCameraInputRef.current) {
         importCameraInputRef.current.value = "";
@@ -998,10 +1047,18 @@ function RouteComponent() {
   }
 
   function handleImportFileSelect(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] ?? null;
+    const files = Array.from(event.target.files ?? []);
     const inputId = event.target.id;
+    const nextFiles =
+      inputId === "table-import-upload"
+        ? files.slice(0, MAX_IMPORT_IMAGE_FILES)
+        : files.slice(0, 1);
 
-    setSelectedImportFile(file);
+    if (inputId === "table-import-upload" && files.length > MAX_IMPORT_IMAGE_FILES) {
+      showWarningToast(`Only the first ${MAX_IMPORT_IMAGE_FILES} images will be imported.`);
+    }
+
+    setSelectedImportFiles(nextFiles);
     setImportPreviewRows([]);
     setImportPreviewSource(null);
 
@@ -1029,7 +1086,7 @@ function RouteComponent() {
   }
 
   function handleClearImportSelection() {
-    setSelectedImportFile(null);
+    setSelectedImportFiles([]);
     setImportPreviewRows([]);
     setImportPreviewSource(null);
 
@@ -1055,6 +1112,13 @@ function RouteComponent() {
   }
 
   async function handleImportRowsWithSource(source: ImportSource) {
+    if (selectedImportFiles.length === 0) {
+      showWarningToast("Please take or upload a file first.");
+      return;
+    }
+
+    const selectedImportFile = selectedImportFiles[0];
+
     if (!selectedImportFile) {
       showWarningToast("Please take or upload a file first.");
       return;
@@ -1080,7 +1144,7 @@ function RouteComponent() {
     await importRowsMutation.mutateAsync({
       departmentSlug: params.departmentSlug,
       tableName: params.tableName,
-      file: selectedImportFile,
+      files: selectedImportFiles,
       source,
     });
   }
@@ -1289,6 +1353,7 @@ function RouteComponent() {
                       ref={importUploadInputRef}
                       type="file"
                       accept="image/*"
+                      multiple
                       onChange={handleImportFileSelect}
                     />
                   </div>
@@ -1310,16 +1375,20 @@ function RouteComponent() {
                 </div>
 
                 <AnimatePresence initial={false}>
-                  {importPreviewUrl && selectedImportFile?.type.startsWith("image/") ? (
+                  {importPreviewUrls.length > 0 ? (
                     <motion.div
                       key="import-preview"
+                      className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
                       {...getExitAnimationProps(isReducedMotion, 10)}
                     >
-                      <img
-                        src={importPreviewUrl}
-                        alt="Selected rows import preview"
-                        className="max-h-80 w-full object-contain"
-                      />
+                      {importPreviewUrls.map((importPreviewUrl, previewIndex) => (
+                        <img
+                          key={`import-preview-${importPreviewUrl}`}
+                          src={importPreviewUrl}
+                          alt={`Selected rows import preview ${previewIndex + 1}`}
+                          className="aspect-video w-full border object-contain"
+                        />
+                      ))}
                     </motion.div>
                   ) : null}
                 </AnimatePresence>
@@ -1329,7 +1398,7 @@ function RouteComponent() {
                     type="button"
                     className="w-full sm:w-auto"
                     disabled={
-                      !selectedImportFile ||
+                      selectedImportFiles.length === 0 ||
                       importRowsMutation.isPending ||
                       importCsvMutation.isPending
                     }
@@ -1346,7 +1415,7 @@ function RouteComponent() {
                     variant="secondary"
                     className="w-full sm:w-auto"
                     disabled={
-                      !selectedImportFile ||
+                      selectedImportFiles.length === 0 ||
                       importRowsMutation.isPending ||
                       importCsvMutation.isPending
                     }
@@ -1361,7 +1430,7 @@ function RouteComponent() {
                     type="button"
                     variant="outline"
                     className="w-full sm:w-auto"
-                    disabled={!selectedImportFile && !importPreviewUrl}
+                    disabled={selectedImportFiles.length === 0 && importPreviewUrls.length === 0}
                     onClick={handleClearImportSelection}
                   >
                     <EraserIcon className="mb-1 size-4" weight="bold" />

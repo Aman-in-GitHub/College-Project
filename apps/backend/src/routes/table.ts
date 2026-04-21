@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
@@ -8,7 +9,7 @@ import type { ScannedTable } from "@/types/table.ts";
 
 import { db, postgresClient } from "@/db/index.ts";
 import { createAuditLog, getAuditRequestContext } from "@/lib/audit-log.ts";
-import { DB_COLUMN_TYPES, PG_TYPE_BY_DB_TYPE } from "@/lib/constants.ts";
+import { DB_COLUMN_TYPES, PG_TYPE_BY_DB_TYPE, PHOTO_UPLOAD_MAX_BYTES } from "@/lib/constants.ts";
 import {
   scanExistingTableRowsWithGemini,
   scanTableImageWithGemini,
@@ -88,6 +89,29 @@ const SYSTEM_TABLE_COLUMN_NAMES = new Set([
   "department_id",
   "created_by_user_id",
 ]);
+
+const PHOTO_UPLOAD_MAX_MB = PHOTO_UPLOAD_MAX_BYTES / 1024 / 1024;
+
+const PHOTO_UPLOAD_TOO_LARGE_MESSAGE = `Photo uploads must be ${PHOTO_UPLOAD_MAX_MB}MB or smaller.`;
+
+const PHOTO_UPLOAD_BODY_MAX_BYTES = PHOTO_UPLOAD_MAX_BYTES + 1024 * 1024;
+
+const photoUploadBodyLimit = bodyLimit({
+  maxSize: PHOTO_UPLOAD_BODY_MAX_BYTES,
+  onError: (c) =>
+    c.json(
+      {
+        success: false,
+        message: PHOTO_UPLOAD_TOO_LARGE_MESSAGE,
+        data: null,
+      },
+      413,
+    ),
+});
+
+function isPhotoUploadTooLarge(file: File): boolean {
+  return file.size > PHOTO_UPLOAD_MAX_BYTES;
+}
 
 function normalizeScannedCellValue(value: string, type: NormalizedColumn["type"]): string | null {
   const trimmedValue = value.trim();
@@ -1211,6 +1235,7 @@ tableRoutes.delete("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin,
 tableRoutes.post(
   "/api/tables/:tableName/import-image/preview",
   requireDepartmentAdmin,
+  photoUploadBodyLimit,
   async (c) => {
     const reqLogger = c.get("logger");
     const department = c.get("department");
@@ -1250,6 +1275,17 @@ tableRoutes.post(
           data: null,
         },
         400,
+      );
+    }
+
+    if (isPhotoUploadTooLarge(file)) {
+      return c.json(
+        {
+          success: false,
+          message: PHOTO_UPLOAD_TOO_LARGE_MESSAGE,
+          data: null,
+        },
+        413,
       );
     }
 
@@ -1717,7 +1753,7 @@ tableRoutes.post("/api/tables/:tableName/import-csv", requireDepartmentAdmin, as
   );
 });
 
-tableRoutes.post("/api/table/scan", requireDepartmentAdmin, async (c) => {
+tableRoutes.post("/api/table/scan", requireDepartmentAdmin, photoUploadBodyLimit, async (c) => {
   const reqLogger = c.get("logger");
   const department = c.get("department");
   const parsedQuery = TABLE_SCAN_SOURCE_SCHEMA.safeParse(c.req.query());
@@ -1768,6 +1804,17 @@ tableRoutes.post("/api/table/scan", requireDepartmentAdmin, async (c) => {
         data: null,
       },
       400,
+    );
+  }
+
+  if (isPhotoUploadTooLarge(file)) {
+    return c.json(
+      {
+        success: false,
+        message: PHOTO_UPLOAD_TOO_LARGE_MESSAGE,
+        data: null,
+      },
+      413,
     );
   }
 

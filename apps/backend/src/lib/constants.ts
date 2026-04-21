@@ -6,6 +6,7 @@ export const GLOBAL_RATE_LIMIT_WINDOW = 60_000;
 export const REDIS_RATE_LIMIT_PREFIX = "college_project_rate_limit:";
 // The model to use for table scanning with Gemini.
 export const GEMINI_TABLE_SCAN_MODEL = "gemini-3.1-flash-lite-preview";
+export const PHOTO_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 
 export const DB_COLUMN_TYPES = [
   "text",
