@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from functools import lru_cache
+from hmac import compare_digest
 from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
@@ -200,6 +201,32 @@ def normalize_header(header: str, index: int) -> str:
     return fallback_name or f"column_{index + 1}"
 
 
+def ensure_unique_column_names(columns: list[dict[str, object]]) -> None:
+    seen_names: set[str] = set()
+
+    for column in columns:
+        name = column["name"]
+
+        if not isinstance(name, str):
+            continue
+
+        unique_name = name
+        suffix = 2
+
+        while unique_name in seen_names:
+            candidate = f"{name}_{suffix}"
+
+            if len(candidate) > 63:
+                trimmed_name = name[: 63 - len(f"_{suffix}")]
+                candidate = f"{trimmed_name}_{suffix}"
+
+            unique_name = candidate
+            suffix += 1
+
+        column["name"] = unique_name
+        seen_names.add(unique_name)
+
+
 def infer_type_with_pandas(values: list[str]) -> str:
     cleaned = [v.strip() for v in values if v and v.strip()]
     if not cleaned:
@@ -376,6 +403,8 @@ def structure_html_table(html_content: str) -> dict[str, object] | None:
     if len(columns) == 0:
         return None
 
+    ensure_unique_column_names(columns)
+
     return {"columns": columns}
 
 
@@ -427,7 +456,7 @@ async def scan_table(
         logger.error("FASTAPI_INTERNAL_TOKEN is not configured")
         raise HTTPException(status_code=500, detail="OCR service is not configured.")
 
-    if x_internal_token != INTERNAL_TOKEN:
+    if x_internal_token is None or not compare_digest(x_internal_token, INTERNAL_TOKEN):
         logger.warning("Rejected OCR request with invalid internal token")
         raise HTTPException(status_code=401, detail="Unauthorized OCR request.")
 
@@ -452,7 +481,10 @@ async def scan_table(
             detail="Unsupported file type. Use an image file such as jpg, jpeg, png, webp, tiff, or bmp.",
         )
 
-    file_bytes = await file.read()
+    try:
+        file_bytes = await file.read()
+    finally:
+        await file.close()
 
     if not file_bytes:
         logger.warning("Rejected empty upload filename=%s", file.filename)
