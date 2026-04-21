@@ -1,10 +1,11 @@
 import { ArrowLeftIcon, ListBulletsIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, getRouteApi } from "@tanstack/react-router";
+import { type PaginationState } from "@tanstack/react-table";
 import { motion, useReducedMotion } from "motion/react";
 import { useState, type ChangeEvent } from "react";
 
-import { buttonVariants } from "@/components/ui/button";
+import { buttonVariants, Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -97,10 +98,15 @@ function isLogsResponse(value: unknown): value is LogsResponse {
   );
 }
 
-async function fetchLogs(params: { search: string; action: string }): Promise<LogsResponse> {
+async function fetchLogs(params: {
+  search: string;
+  action: string;
+  page: number;
+  pageSize: number;
+}): Promise<LogsResponse> {
   const searchParams = new URLSearchParams({
-    page: "1",
-    pageSize: "50",
+    page: String(params.page),
+    pageSize: String(params.pageSize),
     search: params.search,
     action: params.action,
   });
@@ -128,12 +134,37 @@ function RouteComponent() {
   const isReducedMotion = useReducedMotion() === true;
   const [search, setSearch] = useState("");
   const [action, setAction] = useState("");
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 10,
+  });
   const debouncedSearch = useDebouncedValue(search, 300);
   const logsQuery = useQuery({
-    queryKey: ["audit-logs", debouncedSearch, action],
-    queryFn: () => fetchLogs({ search: debouncedSearch, action }),
+    queryKey: ["audit-logs", debouncedSearch, action, pagination.pageIndex, pagination.pageSize],
+    queryFn: () =>
+      fetchLogs({
+        search: debouncedSearch,
+        action,
+        page: pagination.pageIndex + 1,
+        pageSize: pagination.pageSize,
+      }),
     enabled: accessContext.role === "system_admin",
   });
+
+  const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const nextValue = event.target.value;
+
+    setSearch(nextValue);
+    setPagination((previous) => ({
+      ...previous,
+      pageIndex: 0,
+    }));
+  };
+
+  const totalRows = logsQuery.data?.data.pagination.totalRows ?? 0;
+  const pageCount = Math.max(Math.ceil(totalRows / pagination.pageSize), 1);
+  const canPreviousPage = pagination.pageIndex > 0;
+  const canNextPage = pagination.pageIndex < pageCount - 1;
 
   if (accessContext.role !== "system_admin") {
     return (
@@ -199,7 +230,7 @@ function RouteComponent() {
                 <Input
                   id="log-search"
                   value={search}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
+                  onChange={handleSearchChange}
                   placeholder="Search summary, table, actor, or department"
                 />
               </div>
@@ -209,11 +240,17 @@ function RouteComponent() {
                 <Select
                   items={[
                     { value: "all", label: "All actions" },
-                    { value: "table_create", label: "table_create" },
-                    { value: "row_import", label: "row_import" },
-                    { value: "row_create", label: "row_create" },
-                    { value: "row_update", label: "row_update" },
-                    { value: "row_delete", label: "row_delete" },
+                    { value: "table_create", label: "Table created" },
+                    { value: "row_import", label: "Rows imported" },
+                    { value: "row_create", label: "Row created" },
+                    { value: "row_update", label: "Row updated" },
+                    { value: "row_delete", label: "Row deleted" },
+                    { value: "user.created", label: "User created" },
+                    { value: "user.banned", label: "User banned" },
+                    { value: "user.unbanned", label: "User unbanned" },
+                    { value: "session.revoked", label: "Session revoked" },
+                    { value: "membership.created", label: "Member added" },
+                    { value: "department.created", label: "Department created" },
                   ]}
                   value={action || "all"}
                   onValueChange={(value) => setAction(value === "all" ? "" : (value ?? ""))}
@@ -223,11 +260,18 @@ function RouteComponent() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All actions</SelectItem>
-                    <SelectItem value="table_create">table_create</SelectItem>
-                    <SelectItem value="row_import">row_import</SelectItem>
-                    <SelectItem value="row_create">row_create</SelectItem>
-                    <SelectItem value="row_update">row_update</SelectItem>
-                    <SelectItem value="row_delete">row_delete</SelectItem>
+                    <SelectItem value="table_create">Table created</SelectItem>
+                    <SelectItem value="row_import">Rows imported</SelectItem>
+                    <SelectItem value="row_create">Row created</SelectItem>
+                    <SelectItem value="row_update">Row updated</SelectItem>
+                    <SelectItem value="row_delete">Row deleted</SelectItem>
+                    <SelectItem value="user.created">User created</SelectItem>
+                    <SelectItem value="user.banned">User banned</SelectItem>
+                    <SelectItem value="user.unbanned">User unbanned</SelectItem>
+                    <SelectItem value="session.revoked">Session revoked</SelectItem>
+
+                    <SelectItem value="membership.created">Member added</SelectItem>
+                    <SelectItem value="department.created">Department created</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -242,44 +286,106 @@ function RouteComponent() {
                   : "Failed to load audit logs."}
               </p>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>When</TableHead>
-                    <TableHead>Action</TableHead>
-                    <TableHead>Summary</TableHead>
-                    <TableHead>Actor</TableHead>
-                    <TableHead>Department</TableHead>
-                    <TableHead>Table</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {logsQuery.data && logsQuery.data.data.items.length > 0 ? (
-                    logsQuery.data.data.items.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell>{new Date(item.createdAt).toLocaleString()}</TableCell>
-                        <TableCell>{item.action}</TableCell>
-                        <TableCell>{item.summary}</TableCell>
-                        <TableCell>
-                          {item.actor ? `${item.actor.name} (${item.actor.email})` : "-"}
-                        </TableCell>
-                        <TableCell>
-                          {item.department
-                            ? `${item.department.name} (${item.department.slug})`
-                            : "-"}
-                        </TableCell>
-                        <TableCell>{item.tableName ?? "-"}</TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
+              <>
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center">
-                        No audit logs found.
-                      </TableCell>
+                      <TableHead>When</TableHead>
+                      <TableHead>Action</TableHead>
+                      <TableHead>Summary</TableHead>
+                      <TableHead>Actor</TableHead>
+                      <TableHead>Department</TableHead>
+                      <TableHead>Table</TableHead>
                     </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {logsQuery.data && logsQuery.data.data.items.length > 0 ? (
+                      logsQuery.data.data.items.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell>{new Date(item.createdAt).toLocaleString()}</TableCell>
+                          <TableCell>{item.action}</TableCell>
+                          <TableCell>{item.summary}</TableCell>
+                          <TableCell>
+                            {item.actor ? `${item.actor.name} (${item.actor.email})` : "-"}
+                          </TableCell>
+                          <TableCell>
+                            {item.department
+                              ? `${item.department.name} (${item.department.slug})`
+                              : "-"}
+                          </TableCell>
+                          <TableCell>{item.tableName ?? "-"}</TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center">
+                          No audit logs found.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between lg:justify-end">
+                  <div className="text-sm text-muted-foreground sm:mr-1">
+                    {`${totalRows} total log(s)`}
+                  </div>
+                  <Select
+                    items={[
+                      { value: "10", label: "10 / page" },
+                      { value: "20", label: "20 / page" },
+                      { value: "50", label: "50 / page" },
+                    ]}
+                    value={String(pagination.pageSize)}
+                    onValueChange={(value) =>
+                      setPagination({
+                        pageIndex: 0,
+                        pageSize: Number(value),
+                      })
+                    }
+                  >
+                    <SelectTrigger className="w-full sm:w-[120px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">10 / page</SelectItem>
+                      <SelectItem value="20">20 / page</SelectItem>
+                      <SelectItem value="50">50 / page</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <div className="text-sm text-muted-foreground">
+                    Page {pagination.pageIndex + 1} of {pageCount}
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    disabled={!canPreviousPage || logsQuery.isFetching}
+                    onClick={() =>
+                      setPagination((previous) => ({
+                        ...previous,
+                        pageIndex: previous.pageIndex - 1,
+                      }))
+                    }
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    disabled={!canNextPage || logsQuery.isFetching}
+                    onClick={() =>
+                      setPagination((previous) => ({
+                        ...previous,
+                        pageIndex: previous.pageIndex + 1,
+                      }))
+                    }
+                  >
+                    Next
+                  </Button>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

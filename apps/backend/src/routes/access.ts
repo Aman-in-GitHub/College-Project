@@ -7,6 +7,7 @@ import type { AppEnv } from "@/types/index.ts";
 import { db } from "@/db";
 import { sessions, users } from "@/db/schema/auth.ts";
 import { departmentMemberships, departments } from "@/db/schema/department/index.ts";
+import { createAuditLog, getAuditRequestContext } from "@/lib/audit-log.ts";
 import { auth } from "@/lib/auth.ts";
 import { normalizeIdentifier } from "@/lib/utils.ts";
 import { requireAuth, requireSystemAdmin } from "@/middlewares/auth.ts";
@@ -53,6 +54,36 @@ function getErrorMessage(error: unknown): string {
   }
 
   return "Something went wrong.";
+}
+
+async function logAccessDenied(params: {
+  action: string;
+  actorUserId: string | null;
+  departmentId?: string | null;
+  targetUserId?: string | null;
+  targetDepartmentId?: string | null;
+  summary: string;
+  metadata?: Record<string, unknown> | null;
+  ipAddress?: string | null;
+  requestId?: string | null;
+  userAgent?: string | null;
+}): Promise<void> {
+  await createAuditLog({
+    action: "user.ban",
+    actorUserId: params.actorUserId,
+    category: "access_control",
+    status: "denied",
+    departmentId: params.departmentId ?? null,
+    targetType: params.targetUserId ? "user" : params.targetDepartmentId ? "department" : null,
+    targetId: params.targetUserId ?? params.targetDepartmentId ?? null,
+    targetUserId: params.targetUserId ?? null,
+    targetDepartmentId: params.targetDepartmentId ?? null,
+    summary: params.summary,
+    metadata: params.metadata ?? null,
+    ipAddress: params.ipAddress ?? null,
+    requestId: params.requestId ?? null,
+    userAgent: params.userAgent ?? null,
+  });
 }
 
 async function resolveAccessContext(userId: string): Promise<AccessContext> {
@@ -271,6 +302,7 @@ accessRoutes.get("/api/access/managed-users", requireAuth, async (c) => {
 
 accessRoutes.post("/api/access/department-admins", requireSystemAdmin, async (c) => {
   const currentUser = c.get("user");
+  const auditRequestContext = getAuditRequestContext(c);
   const payload = await c.req.json().catch(() => null);
   const parsed = CREATE_DEPARTMENT_ADMIN_SCHEMA.safeParse(payload);
 
@@ -379,6 +411,55 @@ accessRoutes.post("/api/access/department-admins", requireSystemAdmin, async (c)
       createdByUserId: currentUser.id,
     });
 
+    await createAuditLog({
+      action: "department.created",
+      actorUserId: currentUser.id,
+      category: "user_management",
+      departmentId: department.id,
+      targetType: "department",
+      targetId: department.id,
+      targetDepartmentId: department.id,
+      summary: `Created department ${department.name}.`,
+      metadata: {
+        slug: department.slug,
+      },
+      ...auditRequestContext,
+    });
+
+    await createAuditLog({
+      action: "user.created",
+      actorUserId: currentUser.id,
+      category: "user_management",
+      departmentId: department.id,
+      targetType: "user",
+      targetId: authResponse.user.id,
+      targetUserId: authResponse.user.id,
+      targetDepartmentId: department.id,
+      summary: `Created department admin ${authResponse.user.email}.`,
+      metadata: {
+        email: authResponse.user.email,
+        username: authResponse.user.username ?? null,
+        role: "department_admin",
+      },
+      ...auditRequestContext,
+    });
+
+    await createAuditLog({
+      action: "membership.created",
+      actorUserId: currentUser.id,
+      category: "access_control",
+      departmentId: department.id,
+      targetType: "membership",
+      targetId: `${department.id}:${authResponse.user.id}:department_admin`,
+      targetUserId: authResponse.user.id,
+      targetDepartmentId: department.id,
+      summary: `Assigned department_admin membership in ${department.name} to ${authResponse.user.email}.`,
+      metadata: {
+        role: "department_admin",
+      },
+      ...auditRequestContext,
+    });
+
     return c.json(
       {
         success: true,
@@ -409,6 +490,7 @@ accessRoutes.post("/api/access/department-admins", requireSystemAdmin, async (c)
 
 accessRoutes.post("/api/access/ban", requireAuth, async (c) => {
   const currentUser = c.get("user");
+  const auditRequestContext = getAuditRequestContext(c);
   const payload = await c.req.json().catch(() => null);
   const parsed = BAN_USER_SCHEMA.safeParse(payload);
 
@@ -440,6 +522,14 @@ accessRoutes.post("/api/access/ban", requireAuth, async (c) => {
   }
 
   if (parsed.data.userId === currentUser.id) {
+    await logAccessDenied({
+      action: "user.ban",
+      actorUserId: currentUser.id,
+      targetUserId: currentUser.id,
+      summary: "User attempted to ban their own account.",
+      ...auditRequestContext,
+    });
+
     return c.json(
       {
         success: false,
@@ -451,6 +541,27 @@ accessRoutes.post("/api/access/ban", requireAuth, async (c) => {
   }
 
   const accessContext = await resolveAccessContext(currentUser.id);
+  const targetUser = await db.query.users.findFirst({
+    where: (table, { eq }) => eq(table.id, parsed.data.userId),
+    columns: {
+      id: true,
+      email: true,
+      banned: true,
+      banReason: true,
+      banExpires: true,
+    },
+  });
+
+  if (!targetUser) {
+    return c.json(
+      {
+        success: false,
+        message: "User not found.",
+        data: null,
+      },
+      404,
+    );
+  }
 
   if (accessContext.role === "system_admin") {
     const membership = await db.query.departmentMemberships.findFirst({
@@ -465,6 +576,17 @@ accessRoutes.post("/api/access/ban", requireAuth, async (c) => {
     });
 
     if (!membership) {
+      await logAccessDenied({
+        action: "user.ban",
+        actorUserId: currentUser.id,
+        targetUserId: targetUser.id,
+        summary: `System admin attempted to ban unmanaged department admin ${targetUser.email}.`,
+        metadata: {
+          actorRole: accessContext.role,
+        },
+        ...auditRequestContext,
+      });
+
       return c.json(
         {
           success: false,
@@ -488,6 +610,19 @@ accessRoutes.post("/api/access/ban", requireAuth, async (c) => {
     });
 
     if (!membership) {
+      await logAccessDenied({
+        action: "user.ban",
+        actorUserId: currentUser.id,
+        departmentId: accessContext.department.id,
+        targetUserId: targetUser.id,
+        targetDepartmentId: accessContext.department.id,
+        summary: `Department admin attempted to ban unmanaged staff user ${targetUser.email}.`,
+        metadata: {
+          actorRole: accessContext.role,
+        },
+        ...auditRequestContext,
+      });
+
       return c.json(
         {
           success: false,
@@ -498,6 +633,17 @@ accessRoutes.post("/api/access/ban", requireAuth, async (c) => {
       );
     }
   } else {
+    await logAccessDenied({
+      action: "user.ban",
+      actorUserId: currentUser.id,
+      targetUserId: targetUser.id,
+      summary: `User without admin access attempted to ban ${targetUser.email}.`,
+      metadata: {
+        actorRole: accessContext.role,
+      },
+      ...auditRequestContext,
+    });
+
     return c.json(
       {
         success: false,
@@ -508,14 +654,15 @@ accessRoutes.post("/api/access/ban", requireAuth, async (c) => {
     );
   }
 
+  const banReason =
+    accessContext.role === "system_admin"
+      ? "Banned by system admin."
+      : "Banned by department admin.";
   const bannedUsers = await db
     .update(users)
     .set({
       banned: true,
-      banReason:
-        accessContext.role === "system_admin"
-          ? "Banned by system admin."
-          : "Banned by department admin.",
+      banReason,
       banExpires: null,
       updatedAt: new Date(),
     })
@@ -539,7 +686,63 @@ accessRoutes.post("/api/access/ban", requireAuth, async (c) => {
     );
   }
 
-  await db.delete(sessions).where(eq(sessions.userId, parsed.data.userId));
+  const revokedSessions = await db
+    .delete(sessions)
+    .where(eq(sessions.userId, parsed.data.userId))
+    .returning({
+      id: sessions.id,
+    });
+
+  await createAuditLog({
+    action: "user.banned",
+    actorUserId: currentUser.id,
+    category: "user_management",
+    departmentId: accessContext.department?.id ?? null,
+    targetType: "user",
+    targetId: bannedUser.id,
+    targetUserId: bannedUser.id,
+    targetDepartmentId: accessContext.department?.id ?? null,
+    summary: `Banned user ${bannedUser.email}.`,
+    changes: {
+      banned: {
+        before: targetUser.banned,
+        after: true,
+      },
+      banReason: {
+        before: targetUser.banReason,
+        after: banReason,
+      },
+      banExpires: {
+        before: targetUser.banExpires?.toISOString() ?? null,
+        after: null,
+      },
+    },
+    metadata: {
+      actorRole: accessContext.role,
+      revokedSessionCount: revokedSessions.length,
+    },
+    ...auditRequestContext,
+  });
+
+  if (revokedSessions.length > 0) {
+    await createAuditLog({
+      action: "session.revoked",
+      actorUserId: currentUser.id,
+      category: "auth_security",
+      departmentId: accessContext.department?.id ?? null,
+      targetType: "session",
+      targetId: bannedUser.id,
+      targetUserId: bannedUser.id,
+      targetDepartmentId: accessContext.department?.id ?? null,
+      summary: `Revoked ${revokedSessions.length} session(s) for ${bannedUser.email} during ban.`,
+      metadata: {
+        actorRole: accessContext.role,
+        revokedSessionCount: revokedSessions.length,
+        reason: "user_banned",
+      },
+      ...auditRequestContext,
+    });
+  }
 
   return c.json(
     {
@@ -559,6 +762,7 @@ accessRoutes.post("/api/access/ban", requireAuth, async (c) => {
 
 accessRoutes.post("/api/access/unban", requireAuth, async (c) => {
   const currentUser = c.get("user");
+  const auditRequestContext = getAuditRequestContext(c);
   const payload = await c.req.json().catch(() => null);
   const parsed = BAN_USER_SCHEMA.safeParse(payload);
 
@@ -590,6 +794,27 @@ accessRoutes.post("/api/access/unban", requireAuth, async (c) => {
   }
 
   const accessContext = await resolveAccessContext(currentUser.id);
+  const targetUser = await db.query.users.findFirst({
+    where: (table, { eq }) => eq(table.id, parsed.data.userId),
+    columns: {
+      id: true,
+      email: true,
+      banned: true,
+      banReason: true,
+      banExpires: true,
+    },
+  });
+
+  if (!targetUser) {
+    return c.json(
+      {
+        success: false,
+        message: "User not found.",
+        data: null,
+      },
+      404,
+    );
+  }
 
   if (accessContext.role === "system_admin") {
     const membership = await db.query.departmentMemberships.findFirst({
@@ -604,6 +829,17 @@ accessRoutes.post("/api/access/unban", requireAuth, async (c) => {
     });
 
     if (!membership) {
+      await logAccessDenied({
+        action: "user.unban",
+        actorUserId: currentUser.id,
+        targetUserId: targetUser.id,
+        summary: `System admin attempted to unban unmanaged department admin ${targetUser.email}.`,
+        metadata: {
+          actorRole: accessContext.role,
+        },
+        ...auditRequestContext,
+      });
+
       return c.json(
         {
           success: false,
@@ -627,6 +863,19 @@ accessRoutes.post("/api/access/unban", requireAuth, async (c) => {
     });
 
     if (!membership) {
+      await logAccessDenied({
+        action: "user.unban",
+        actorUserId: currentUser.id,
+        departmentId: accessContext.department.id,
+        targetUserId: targetUser.id,
+        targetDepartmentId: accessContext.department.id,
+        summary: `Department admin attempted to unban unmanaged staff user ${targetUser.email}.`,
+        metadata: {
+          actorRole: accessContext.role,
+        },
+        ...auditRequestContext,
+      });
+
       return c.json(
         {
           success: false,
@@ -637,6 +886,17 @@ accessRoutes.post("/api/access/unban", requireAuth, async (c) => {
       );
     }
   } else {
+    await logAccessDenied({
+      action: "user.unban",
+      actorUserId: currentUser.id,
+      targetUserId: targetUser.id,
+      summary: `User without admin access attempted to unban ${targetUser.email}.`,
+      metadata: {
+        actorRole: accessContext.role,
+      },
+      ...auditRequestContext,
+    });
+
     return c.json(
       {
         success: false,
@@ -675,6 +935,36 @@ accessRoutes.post("/api/access/unban", requireAuth, async (c) => {
     );
   }
 
+  await createAuditLog({
+    action: "user.unbanned",
+    actorUserId: currentUser.id,
+    category: "user_management",
+    departmentId: accessContext.department?.id ?? null,
+    targetType: "user",
+    targetId: unbannedUser.id,
+    targetUserId: unbannedUser.id,
+    targetDepartmentId: accessContext.department?.id ?? null,
+    summary: `Unbanned user ${unbannedUser.email}.`,
+    changes: {
+      banned: {
+        before: targetUser.banned,
+        after: false,
+      },
+      banReason: {
+        before: targetUser.banReason,
+        after: null,
+      },
+      banExpires: {
+        before: targetUser.banExpires?.toISOString() ?? null,
+        after: null,
+      },
+    },
+    metadata: {
+      actorRole: accessContext.role,
+    },
+    ...auditRequestContext,
+  });
+
   return c.json(
     {
       success: true,
@@ -693,6 +983,7 @@ accessRoutes.post("/api/access/unban", requireAuth, async (c) => {
 
 accessRoutes.post("/api/access/staff", requireAuth, async (c) => {
   const currentUser = c.get("user");
+  const auditRequestContext = getAuditRequestContext(c);
   const payload = await c.req.json().catch(() => null);
   const parsed = CREATE_STAFF_SCHEMA.safeParse(payload);
 
@@ -726,6 +1017,18 @@ accessRoutes.post("/api/access/staff", requireAuth, async (c) => {
   const accessContext = await resolveAccessContext(currentUser.id);
 
   if (accessContext.role !== "department_admin") {
+    await logAccessDenied({
+      action: "user.create",
+      actorUserId: currentUser.id,
+      departmentId: accessContext.department?.id ?? null,
+      targetDepartmentId: accessContext.department?.id ?? null,
+      summary: "Non-department-admin attempted to create department staff.",
+      metadata: {
+        actorRole: accessContext.role,
+      },
+      ...auditRequestContext,
+    });
+
     return c.json(
       {
         success: false,
@@ -754,6 +1057,40 @@ accessRoutes.post("/api/access/staff", requireAuth, async (c) => {
       userId: authResponse.user.id,
       role: "department_staff",
       createdByUserId: currentUser.id,
+    });
+
+    await createAuditLog({
+      action: "user.created",
+      actorUserId: currentUser.id,
+      category: "user_management",
+      departmentId: accessContext.department.id,
+      targetType: "user",
+      targetId: authResponse.user.id,
+      targetUserId: authResponse.user.id,
+      targetDepartmentId: accessContext.department.id,
+      summary: `Created department staff ${authResponse.user.email}.`,
+      metadata: {
+        email: authResponse.user.email,
+        username: authResponse.user.username ?? null,
+        role: "department_staff",
+      },
+      ...auditRequestContext,
+    });
+
+    await createAuditLog({
+      action: "membership.created",
+      actorUserId: currentUser.id,
+      category: "access_control",
+      departmentId: accessContext.department.id,
+      targetType: "membership",
+      targetId: `${accessContext.department.id}:${authResponse.user.id}:department_staff`,
+      targetUserId: authResponse.user.id,
+      targetDepartmentId: accessContext.department.id,
+      summary: `Assigned department_staff membership in ${accessContext.department.name} to ${authResponse.user.email}.`,
+      metadata: {
+        role: "department_staff",
+      },
+      ...auditRequestContext,
     });
 
     return c.json(

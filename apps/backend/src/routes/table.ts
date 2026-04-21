@@ -7,7 +7,7 @@ import type { AppEnv } from "@/types/index.ts";
 import type { ScannedTable } from "@/types/table.ts";
 
 import { db, postgresClient } from "@/db/index.ts";
-import { createAuditLog } from "@/lib/audit-log.ts";
+import { createAuditLog, getAuditRequestContext } from "@/lib/audit-log.ts";
 import { DB_COLUMN_TYPES, PG_TYPE_BY_DB_TYPE } from "@/lib/constants.ts";
 import {
   scanExistingTableRowsWithGemini,
@@ -771,6 +771,7 @@ tableRoutes.get("/api/tables/:tableName", requireDepartmentStaff, async (c) => {
 tableRoutes.patch("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin, async (c) => {
   const department = c.get("department");
   const user = c.get("user");
+  const auditRequestContext = getAuditRequestContext(c);
   const tableName = c.req.param("tableName");
   const rowId = c.req.param("rowId");
   const payload = await c.req.json().catch(() => null);
@@ -885,21 +886,50 @@ tableRoutes.patch("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin, 
     .join(", ");
 
   const quotedTableName = quoteTableIdentifier(normalizedDepartmentTableName);
+  const existingRow = await getTableRowById(normalizedDepartmentTableName, rowId);
+
+  if (!existingRow) {
+    return c.json(
+      {
+        success: false,
+        message: "Row not found.",
+        data: null,
+      },
+      404,
+    );
+  }
 
   await postgresClient.unsafe(
     `UPDATE ${quotedTableName} SET ${setClause}, ${quoteIdentifier("updated_at")} = NOW() WHERE "id" = ${toSqlLiteral(rowId)}`,
   );
 
+  const row = await getTableRowById(normalizedDepartmentTableName, rowId);
+  const changes = Object.fromEntries(
+    normalizedEntries.map((entry) => [
+      entry.column.columnName,
+      {
+        before: existingRow[entry.column.columnName] ?? null,
+        after: row?.[entry.column.columnName] ?? null,
+      },
+    ]),
+  );
+
   await createAuditLog({
     action: "row_update",
     actorUserId: user?.id ?? null,
+    category: "data",
     departmentId: department.id,
     tableName: normalizedDepartmentTableName,
     rowId,
+    targetType: "table_row",
+    targetId: rowId,
+    targetDepartmentId: department.id,
     summary: `Updated row ${rowId} in ${tableName}.`,
+    changes,
     metadata: {
       updatedColumns: normalizedEntries.map((entry) => entry.column.columnName),
     },
+    ...auditRequestContext,
   });
 
   return c.json(
@@ -907,7 +937,7 @@ tableRoutes.patch("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin, 
       success: true,
       message: "Row updated successfully.",
       data: {
-        row: await getTableRowById(normalizedDepartmentTableName, rowId),
+        row,
       },
     },
     200,
@@ -917,6 +947,7 @@ tableRoutes.patch("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin, 
 tableRoutes.post("/api/tables/:tableName/rows", requireDepartmentAdmin, async (c) => {
   const department = c.get("department");
   const user = c.get("user");
+  const auditRequestContext = getAuditRequestContext(c);
   const tableName = c.req.param("tableName");
   const payload = await c.req.json().catch(() => null);
   const parsedPayload = CREATE_TABLE_ROW_SCHEMA.safeParse(payload);
@@ -1063,13 +1094,19 @@ tableRoutes.post("/api/tables/:tableName/rows", requireDepartmentAdmin, async (c
   await createAuditLog({
     action: "row_create",
     actorUserId: user?.id ?? null,
+    category: "data",
     departmentId: department.id,
     tableName: normalizedDepartmentTableName,
     rowId,
+    targetType: "table_row",
+    targetId: rowId,
+    targetDepartmentId: department.id,
     summary: `Added a new row to ${tableName}.`,
     metadata: {
-      columnCount: editableColumns.length,
+      providedColumnCount: normalizedEntries.length,
+      totalEditableColumnCount: editableColumns.length,
     },
+    ...auditRequestContext,
   });
 
   return c.json(
@@ -1087,6 +1124,7 @@ tableRoutes.post("/api/tables/:tableName/rows", requireDepartmentAdmin, async (c
 tableRoutes.delete("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin, async (c) => {
   const department = c.get("department");
   const user = c.get("user");
+  const auditRequestContext = getAuditRequestContext(c);
   const tableName = c.req.param("tableName");
   const rowId = c.req.param("rowId");
 
@@ -1149,10 +1187,15 @@ tableRoutes.delete("/api/tables/:tableName/rows/:rowId", requireDepartmentAdmin,
   await createAuditLog({
     action: "row_delete",
     actorUserId: user?.id ?? null,
+    category: "data",
     departmentId: department.id,
     tableName: normalizedDepartmentTableName,
     rowId,
+    targetType: "table_row",
+    targetId: rowId,
+    targetDepartmentId: department.id,
     summary: `Deleted row ${rowId} from ${tableName}.`,
+    ...auditRequestContext,
   });
 
   return c.json(
@@ -1306,6 +1349,7 @@ tableRoutes.post(
   async (c) => {
     const department = c.get("department");
     const user = c.get("user");
+    const auditRequestContext = getAuditRequestContext(c);
     const tableName = c.req.param("tableName");
     const payload = await c.req.json().catch(() => null);
     const parsedPayload = IMPORT_IMAGE_COMMIT_SCHEMA.safeParse(payload);
@@ -1424,8 +1468,12 @@ tableRoutes.post(
     await createAuditLog({
       action: "row_import",
       actorUserId: user?.id ?? null,
+      category: "import_export",
       departmentId: department.id,
       tableName: normalizedDepartmentTableName,
+      targetType: "table",
+      targetId: normalizedDepartmentTableName,
+      targetDepartmentId: department.id,
       summary: `Imported ${rowsToInsert.length} row(s) into ${tableName}.`,
       metadata: {
         source: parsedPayload.data.source,
@@ -1433,6 +1481,7 @@ tableRoutes.post(
         insertedRowCount: rowsToInsert.length,
         skippedDuplicateCount,
       },
+      ...auditRequestContext,
     });
 
     return c.json(
@@ -1455,6 +1504,7 @@ tableRoutes.post(
 tableRoutes.post("/api/tables/:tableName/import-csv", requireDepartmentAdmin, async (c) => {
   const department = c.get("department");
   const user = c.get("user");
+  const auditRequestContext = getAuditRequestContext(c);
   const tableName = c.req.param("tableName");
   const body = await c.req.parseBody();
   const maybeFile = body.file;
@@ -1636,14 +1686,19 @@ tableRoutes.post("/api/tables/:tableName/import-csv", requireDepartmentAdmin, as
   await createAuditLog({
     action: "row_import",
     actorUserId: user?.id ?? null,
+    category: "import_export",
     departmentId: department.id,
     tableName: normalizedDepartmentTableName,
+    targetType: "table",
+    targetId: normalizedDepartmentTableName,
+    targetDepartmentId: department.id,
     summary: `Imported ${insertedRowCount} CSV row(s) into ${tableName}.`,
     metadata: {
       source: "csv",
       insertedRowCount,
       skippedDuplicateCount,
     },
+    ...auditRequestContext,
   });
 
   return c.json(
@@ -2048,17 +2103,23 @@ tableRoutes.post("/api/table/create", requireDepartmentAdmin, async (c) => {
     parsed.data.fillData && rowsToInsert.length > 0
       ? `Table created and ${rowsToInsert.length} rows inserted successfully`
       : "Table created successfully";
+  const auditRequestContext = getAuditRequestContext(c);
 
   await createAuditLog({
     action: "table_create",
     actorUserId: user?.id ?? null,
+    category: "data",
     departmentId: department.id,
     tableName: normalizedTableName,
+    targetType: "table",
+    targetId: normalizedTableName,
+    targetDepartmentId: department.id,
     summary: `Created table ${normalizedBaseTableName}.`,
     metadata: {
       columnCount: normalizedColumns.length,
       insertedRowCount: parsed.data.fillData ? rowsToInsert.length : 0,
     },
+    ...auditRequestContext,
   });
 
   return c.json(
