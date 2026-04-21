@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -20,14 +20,38 @@ const AUDIT_LOG_QUERY_SCHEMA = z.object({
   pageSize: z.coerce.number().int().min(1).max(50).default(20),
   search: z.string().trim().max(200).default(""),
   action: z.string().trim().max(100).default(""),
-  category: z.enum(AUDIT_LOG_CATEGORIES).optional(),
-  status: z.enum(AUDIT_LOG_STATUSES).optional(),
-  targetType: z.enum(AUDIT_LOG_TARGET_TYPES).optional(),
+  category: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.enum(AUDIT_LOG_CATEGORIES).optional(),
+  ),
+  status: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.enum(AUDIT_LOG_STATUSES).optional(),
+  ),
+  targetType: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.enum(AUDIT_LOG_TARGET_TYPES).optional(),
+  ),
   targetUserId: z.string().trim().max(128).default(""),
   targetDepartmentId: z.string().trim().max(128).default(""),
+  dateFrom: z.string().trim().max(40).default(""),
+  dateTo: z.string().trim().max(40).default(""),
 });
 
 export const logsRoutes = new Hono<AppEnv>();
+
+function parseAuditDateFilter(value: string, boundary: "start" | "end"): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const dateOnlyPattern = /^\d{4}-\d{2}-\d{2}$/;
+  const date = dateOnlyPattern.test(value)
+    ? new Date(`${value}T${boundary === "start" ? "00:00:00.000" : "23:59:59.999"}Z`)
+    : new Date(value);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
 
 logsRoutes.get("/api/logs", requireSystemAdmin, async (c) => {
   const parsedQuery = AUDIT_LOG_QUERY_SCHEMA.safeParse(c.req.query());
@@ -58,9 +82,24 @@ logsRoutes.get("/api/logs", requireSystemAdmin, async (c) => {
     targetType,
     targetUserId,
     targetDepartmentId,
+    dateFrom,
+    dateTo,
   } = parsedQuery.data;
   const offset = (page - 1) * pageSize;
   const conditions = [];
+  const parsedDateFrom = parseAuditDateFilter(dateFrom, "start");
+  const parsedDateTo = parseAuditDateFilter(dateTo, "end");
+
+  if ((dateFrom && parsedDateFrom === null) || (dateTo && parsedDateTo === null)) {
+    return c.json(
+      {
+        success: false,
+        message: "Invalid audit log date filter.",
+        data: null,
+      },
+      400,
+    );
+  }
 
   if (action) {
     conditions.push(eq(auditLogs.action, action));
@@ -74,7 +113,11 @@ logsRoutes.get("/api/logs", requireSystemAdmin, async (c) => {
     conditions.push(eq(auditLogs.status, status));
   }
 
-  if (targetType) {
+  if (targetType === "auth") {
+    conditions.push(inArray(auditLogs.targetType, ["auth", "session"]));
+  } else if (targetType === "table") {
+    conditions.push(inArray(auditLogs.targetType, ["table", "table_row"]));
+  } else if (targetType) {
     conditions.push(eq(auditLogs.targetType, targetType));
   }
 
@@ -84,6 +127,14 @@ logsRoutes.get("/api/logs", requireSystemAdmin, async (c) => {
 
   if (targetDepartmentId) {
     conditions.push(eq(auditLogs.targetDepartmentId, targetDepartmentId));
+  }
+
+  if (parsedDateFrom) {
+    conditions.push(gte(auditLogs.createdAt, parsedDateFrom));
+  }
+
+  if (parsedDateTo) {
+    conditions.push(lte(auditLogs.createdAt, parsedDateTo));
   }
 
   if (search) {

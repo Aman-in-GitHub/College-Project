@@ -21,6 +21,27 @@ A full-stack document digitization system that converts paper tables from photos
 - `Zod`
 - `pnpm` workspaces
 
+## Architecture
+
+```mermaid
+flowchart LR
+  user["User"] --> website["Website"]
+  website --> backend["Backend API"]
+  backend --> website
+  website --> user
+  backend --> postgres[("PostgreSQL")]
+  backend --> redis[("Redis")]
+  backend --> fastapi["PaddleOCR Service"]
+  backend --> gemini["Gemini"]
+```
+
+- `Website` - React dashboard for scanning, reviewing, editing, exporting, and managing access.
+- `Backend API` - Bun/Hono service for auth, roles, imports, dynamic tables, and audit logs.
+- `PostgreSQL` - stores users, departments, generated tables, row data, and logs.
+- `Redis` - stores rate-limit state.
+- `PaddleOCR Service` - FastAPI microservice for image-based table recognition.
+- `Gemini` - AI OCR path for table extraction and imports.
+
 ## Features
 
 - Role-based access with `system_admin`, `department_admin`, and `department_staff`

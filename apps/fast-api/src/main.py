@@ -14,7 +14,7 @@ from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from paddleocr import TableRecognitionPipelineV2
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
@@ -25,6 +25,14 @@ logger = logging.getLogger("college_project.fastapi_service")
 logger.setLevel(logging.INFO)
 
 DB_COLUMN_TYPES = ("text", "integer", "numeric", "boolean", "date", "time", "timestamp")
+PIPELINE_MODEL_NAMES = {
+    "wired_table_structure_recognition_model_name": "SLANeXt_wired",
+    "wireless_table_structure_recognition_model_name": "SLANeXt_wireless",
+    "wired_table_cells_detection_model_name": "RT-DETR-L_wired_table_cell_det",
+    "wireless_table_cells_detection_model_name": "RT-DETR-L_wireless_table_cell_det",
+    "text_detection_model_name": "PP-OCRv5_server_det",
+    "text_recognition_model_name": "PP-OCRv5_server_rec",
+}
 SUPPORTED_CONTENT_TYPES = {
     "image/jpeg",
     "image/png",
@@ -77,7 +85,13 @@ app.add_middleware(
 @lru_cache(maxsize=1)
 def get_pipeline() -> TableRecognitionPipelineV2:
     logger.info("Initializing table recognition pipeline")
-    return TableRecognitionPipelineV2()
+    return TableRecognitionPipelineV2(
+        **PIPELINE_MODEL_NAMES,
+        use_doc_orientation_classify=True,
+        use_doc_unwarping=True,
+        use_layout_detection=True,
+        use_ocr_model=True,
+    )
 
 
 def export_result_to_json(result: object, output_path: Path) -> object:
@@ -95,7 +109,7 @@ def export_result_to_json(result: object, output_path: Path) -> object:
 def write_pipeline_input(input_path: Path, file_bytes: bytes) -> None:
     try:
         with Image.open(BytesIO(file_bytes)) as image:
-            converted_image = image.convert("RGB")
+            converted_image = ImageOps.exif_transpose(image).convert("RGB")
             converted_image.save(input_path, format="PNG")
     except UnidentifiedImageError as exc:
         raise ValueError("Uploaded file is not a readable image.") from exc
@@ -392,6 +406,10 @@ def structure_html_table(html_content: str) -> dict[str, object] | None:
         values = [
             row[column_index].strip() for row in data_rows if column_index < len(row)
         ]
+
+        if not header.strip() and not any(value.strip() for value in values):
+            continue
+
         columns.append(
             {
                 "name": normalize_header(header, column_index),
@@ -478,7 +496,7 @@ async def scan_table(
         )
         raise HTTPException(
             status_code=400,
-            detail="Unsupported file type. Use an image file such as jpg, jpeg, png, webp, tiff, or bmp.",
+            detail="Unsupported file type. Upload a JPG, PNG, WEBP, TIFF, or BMP image.",
         )
 
     try:
@@ -502,7 +520,8 @@ async def scan_table(
             "Table recognition failed filename=%s error=%s", file.filename, exc
         )
         raise HTTPException(
-            status_code=500, detail=f"Table recognition failed: {exc}"
+            status_code=500,
+            detail="Could not scan this table. Try a clearer image or try again.",
         ) from exc
 
     logger.info(
