@@ -60,8 +60,10 @@ function normalizeIpAddress(value: string): string | null {
   return normalizeValidatedIpAddress(trimmedValue);
 }
 
-function getForwardedIp(c: Context, headerName: string): string | null {
-  const headerValue = c.req.header(headerName)?.trim() ?? "";
+type HeaderGetter = (headerName: string) => string | null | undefined;
+
+function getForwardedIp(getHeader: HeaderGetter, headerName: string): string | null {
+  const headerValue = getHeader(headerName)?.trim() ?? "";
 
   if (headerValue.length === 0) {
     return null;
@@ -73,19 +75,19 @@ function getForwardedIp(c: Context, headerName: string): string | null {
 }
 
 export function getClientIp(c: Context): string | null {
-  const cfIp = getForwardedIp(c, "cf-connecting-ip");
+  const cfIp = getForwardedIp((headerName) => c.req.header(headerName), "cf-connecting-ip");
 
   if (cfIp) {
     return cfIp;
   }
 
-  const realIp = getForwardedIp(c, "x-real-ip");
+  const realIp = getForwardedIp((headerName) => c.req.header(headerName), "x-real-ip");
 
   if (realIp) {
     return realIp;
   }
 
-  const forwardedIp = getForwardedIp(c, "x-forwarded-for");
+  const forwardedIp = getForwardedIp((headerName) => c.req.header(headerName), "x-forwarded-for");
 
   if (forwardedIp) {
     return forwardedIp;
@@ -96,6 +98,28 @@ export function getClientIp(c: Context): string | null {
 
   if (normalizedRemoteAddress) {
     return normalizedRemoteAddress;
+  }
+
+  return null;
+}
+
+export function getClientIpFromHeaders(headers: Headers): string | null {
+  const cfIp = getForwardedIp((headerName) => headers.get(headerName), "cf-connecting-ip");
+
+  if (cfIp) {
+    return cfIp;
+  }
+
+  const realIp = getForwardedIp((headerName) => headers.get(headerName), "x-real-ip");
+
+  if (realIp) {
+    return realIp;
+  }
+
+  const forwardedIp = getForwardedIp((headerName) => headers.get(headerName), "x-forwarded-for");
+
+  if (forwardedIp) {
+    return forwardedIp;
   }
 
   return null;

@@ -5,7 +5,7 @@ import type { AppEnv } from "@/types/index.ts";
 
 import { db } from "@/db/index.ts";
 import { auditLogs } from "@/db/schema/audit.ts";
-import { getClientIp } from "@/lib/utils.ts";
+import { getClientIp, getClientIpFromHeaders } from "@/lib/utils.ts";
 
 type CreateAuditLogParams = {
   action: string;
@@ -35,6 +35,20 @@ export function getAuditRequestContext(
 
   return {
     ipAddress: getClientIp(c),
+    requestId: requestId.length > 0 ? requestId : null,
+    userAgent: userAgent.length > 0 ? userAgent : null,
+  };
+}
+
+export function getAuditRequestContextFromHeaders(
+  headers: Headers | undefined,
+): Pick<CreateAuditLogParams, "ipAddress" | "requestId" | "userAgent"> {
+  const requestHeaders = headers ?? new Headers();
+  const userAgent = requestHeaders.get("user-agent")?.trim() ?? "";
+  const requestId = requestHeaders.get("x-request-id")?.trim() ?? "";
+
+  return {
+    ipAddress: getClientIpFromHeaders(requestHeaders),
     requestId: requestId.length > 0 ? requestId : null,
     userAgent: userAgent.length > 0 ? userAgent : null,
   };

@@ -69,7 +69,7 @@ async function logAccessDenied(params: {
   userAgent?: string | null;
 }): Promise<void> {
   await createAuditLog({
-    action: "user.ban",
+    action: params.action,
     actorUserId: params.actorUserId,
     category: "access_control",
     status: "denied",

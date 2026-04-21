@@ -24,7 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { env } from "@/lib/env";
-import { fetchApiJson, getEnterAnimationProps, isRecord, useDebouncedValue } from "@/lib/utils";
+import { cn, fetchApiJson, getEnterAnimationProps, isRecord, useDebouncedValue } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/logs")({
   component: RouteComponent,
@@ -38,6 +38,29 @@ export const Route = createFileRoute("/_authenticated/logs")({
 });
 
 const authenticatedRoute = getRouteApi("/_authenticated");
+const pageSizeOptions = [10, 20, 50].map((pageSize) => ({
+  value: String(pageSize),
+  label: `${pageSize} / page`,
+}));
+const auditActionOptions = [
+  { value: "all", label: "All actions" },
+  { value: "table_create", label: "Table created" },
+  { value: "row_import", label: "Rows imported" },
+  { value: "row_create", label: "Row created" },
+  { value: "row_update", label: "Row updated" },
+  { value: "row_delete", label: "Row deleted" },
+  { value: "user.logged_in", label: "User logged in" },
+  { value: "user.logged_out", label: "User logged out" },
+  { value: "user.create", label: "User create denied" },
+  { value: "user.created", label: "User created" },
+  { value: "user.ban", label: "User ban denied" },
+  { value: "user.banned", label: "User banned" },
+  { value: "user.unban", label: "User unban denied" },
+  { value: "user.unbanned", label: "User unbanned" },
+  { value: "session.revoked", label: "Session revoked" },
+  { value: "membership.created", label: "Member added" },
+  { value: "department.created", label: "Department created" },
+];
 
 type AuditLogItem = {
   id: string;
@@ -98,6 +121,38 @@ function isLogsResponse(value: unknown): value is LogsResponse {
   );
 }
 
+function getAuditActionClassName(action: string): string {
+  if (action.includes("unban") || action.includes("update")) {
+    return "text-blue-500";
+  }
+
+  if (action.includes("delete") || action.includes("ban") || action.includes("revoked")) {
+    return "text-red-500";
+  }
+
+  if (action.includes("logged_out")) {
+    return "text-amber-500";
+  }
+
+  if (action.includes("membership")) {
+    return "text-teal-500";
+  }
+
+  if (action.includes("department")) {
+    return "text-cyan-500";
+  }
+
+  if (action.includes("logged_in") || action.includes("create") || action.includes("import")) {
+    return "text-green-500";
+  }
+
+  if (action.includes("row")) {
+    return "text-blue-500";
+  }
+
+  return "text-muted-foreground";
+}
+
 async function fetchLogs(params: {
   search: string;
   action: string;
@@ -155,6 +210,14 @@ function RouteComponent() {
     const nextValue = event.target.value;
 
     setSearch(nextValue);
+    setPagination((previous) => ({
+      ...previous,
+      pageIndex: 0,
+    }));
+  };
+
+  const handleActionChange = (value: string | null) => {
+    setAction(value === "all" ? "" : (value ?? ""));
     setPagination((previous) => ({
       ...previous,
       pageIndex: 0,
@@ -238,40 +301,19 @@ function RouteComponent() {
               <div className="flex flex-col gap-2">
                 <label className="text-sm font-medium">Action</label>
                 <Select
-                  items={[
-                    { value: "all", label: "All actions" },
-                    { value: "table_create", label: "Table created" },
-                    { value: "row_import", label: "Rows imported" },
-                    { value: "row_create", label: "Row created" },
-                    { value: "row_update", label: "Row updated" },
-                    { value: "row_delete", label: "Row deleted" },
-                    { value: "user.created", label: "User created" },
-                    { value: "user.banned", label: "User banned" },
-                    { value: "user.unbanned", label: "User unbanned" },
-                    { value: "session.revoked", label: "Session revoked" },
-                    { value: "membership.created", label: "Member added" },
-                    { value: "department.created", label: "Department created" },
-                  ]}
+                  items={auditActionOptions}
                   value={action || "all"}
-                  onValueChange={(value) => setAction(value === "all" ? "" : (value ?? ""))}
+                  onValueChange={handleActionChange}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="All actions" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All actions</SelectItem>
-                    <SelectItem value="table_create">Table created</SelectItem>
-                    <SelectItem value="row_import">Rows imported</SelectItem>
-                    <SelectItem value="row_create">Row created</SelectItem>
-                    <SelectItem value="row_update">Row updated</SelectItem>
-                    <SelectItem value="row_delete">Row deleted</SelectItem>
-                    <SelectItem value="user.created">User created</SelectItem>
-                    <SelectItem value="user.banned">User banned</SelectItem>
-                    <SelectItem value="user.unbanned">User unbanned</SelectItem>
-                    <SelectItem value="session.revoked">Session revoked</SelectItem>
-
-                    <SelectItem value="membership.created">Member added</SelectItem>
-                    <SelectItem value="department.created">Department created</SelectItem>
+                    {auditActionOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -303,7 +345,13 @@ function RouteComponent() {
                       logsQuery.data.data.items.map((item) => (
                         <TableRow key={item.id}>
                           <TableCell>{new Date(item.createdAt).toLocaleString()}</TableCell>
-                          <TableCell>{item.action}</TableCell>
+                          <TableCell>
+                            <span
+                              className={cn("font-medium", getAuditActionClassName(item.action))}
+                            >
+                              {item.action}
+                            </span>
+                          </TableCell>
                           <TableCell>{item.summary}</TableCell>
                           <TableCell>
                             {item.actor ? `${item.actor.name} (${item.actor.email})` : "-"}
@@ -331,11 +379,7 @@ function RouteComponent() {
                     {`${totalRows} total log(s)`}
                   </div>
                   <Select
-                    items={[
-                      { value: "10", label: "10 / page" },
-                      { value: "20", label: "20 / page" },
-                      { value: "50", label: "50 / page" },
-                    ]}
+                    items={pageSizeOptions}
                     value={String(pagination.pageSize)}
                     onValueChange={(value) =>
                       setPagination({
@@ -348,9 +392,11 @@ function RouteComponent() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="10">10 / page</SelectItem>
-                      <SelectItem value="20">20 / page</SelectItem>
-                      <SelectItem value="50">50 / page</SelectItem>
+                      {pageSizeOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
 
