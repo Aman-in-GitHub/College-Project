@@ -113,6 +113,32 @@ function isPhotoUploadTooLarge(file: File): boolean {
   return file.size > PHOTO_UPLOAD_MAX_BYTES;
 }
 
+function normalizeDateCellValue(value: string): string | null {
+  const dateOnlyPattern = /^\d{4}-\d{2}-\d{2}$/;
+
+  if (dateOnlyPattern.test(value)) {
+    return value;
+  }
+
+  const parsedDate = new Date(value);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return parsedDate.toISOString().slice(0, 10);
+}
+
+function normalizeTimestampCellValue(value: string): string | null {
+  const parsedDate = new Date(value);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return parsedDate.toISOString().replace("T", " ").replace("Z", "");
+}
+
 function normalizeScannedCellValue(value: string, type: NormalizedColumn["type"]): string | null {
   const trimmedValue = value.trim();
 
@@ -140,6 +166,14 @@ function normalizeScannedCellValue(value: string, type: NormalizedColumn["type"]
     if (["false", "f", "no", "n", "0"].includes(normalizedValue)) {
       return "false";
     }
+  }
+
+  if (type === "date") {
+    return normalizeDateCellValue(trimmedValue);
+  }
+
+  if (type === "timestamp") {
+    return normalizeTimestampCellValue(trimmedValue);
   }
 
   return trimmedValue;

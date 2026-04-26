@@ -286,8 +286,13 @@ def infer_type_with_pandas(values: list[str]) -> str:
             return "integer"
         return "numeric"
 
-    dt = pd.to_datetime(s, errors="coerce")
-    dt_ratio = dt.notna().mean()
+    try:
+        dt = pd.to_datetime(s.astype(str), errors="coerce", utc=True)
+        dt = dt.dt.tz_convert(None)
+        dt_ratio = dt.notna().mean()
+    except Exception:
+        dt_ratio = 0
+        dt = pd.Series(pd.NaT, index=s.index)
 
     if dt_ratio > 0.9:
         times = dt.dropna().dt.time
