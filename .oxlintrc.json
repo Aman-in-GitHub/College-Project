@@ -11,5 +11,5 @@
     "typescript",
     "unicorn"
   ],
-  "ignorePatterns": ["node_modules", "**/*.gen.ts"]
+  "ignorePatterns": ["node_modules", "__pycache__", "android", "**/*.gen.ts"]
 }

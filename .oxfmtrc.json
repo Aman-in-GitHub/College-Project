@@ -19,5 +19,5 @@
   "experimentalSortPackageJson": {
     "sortScripts": true
   },
-  "ignorePatterns": ["node_modules", "android", "**/*.gen.ts"]
+  "ignorePatterns": ["node_modules", "__pycache__", "android", "**/*.gen.ts"]
 }

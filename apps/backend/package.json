@@ -12,16 +12,16 @@
     "dev": "bun db:migrate && bun db:seed && bun db:studio & bun run --hot src/index.ts"
   },
   "dependencies": {
-    "@ai-sdk/google": "^3.0.64",
-    "ai": "^6.0.168",
+    "@ai-sdk/google": "^3.0.67",
+    "ai": "^6.0.175",
     "better-auth": "^1.6.9",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.15",
+    "hono": "^4.12.18",
     "hono-rate-limiter": "^0.5.3",
-    "nanoid": "^5.1.9",
+    "nanoid": "^5.1.11",
     "pino": "^10.3.1",
     "postgres": "^3.4.9",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bun": "latest",
