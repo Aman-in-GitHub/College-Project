@@ -14,9 +14,9 @@
   },
   "devDependencies": {
     "lefthook": "^2.1.6",
-    "oxfmt": "^0.48.0",
-    "oxlint": "^1.63.0",
+    "oxfmt": "^0.50.0",
+    "oxlint": "^1.65.0",
     "typescript": "^6.0.3"
   },
-  "packageManager": "pnpm@11.0.8"
+  "packageManager": "pnpm@11.1.3"
 }
