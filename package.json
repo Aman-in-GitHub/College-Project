@@ -13,10 +13,10 @@
     "update:latest": "pnpm -r update --latest"
   },
   "devDependencies": {
-    "lefthook": "^2.1.6",
-    "oxfmt": "^0.50.0",
-    "oxlint": "^1.65.0",
-    "typescript": "^6.0.3"
+    "lefthook": "^2.1.10",
+    "oxfmt": "^0.59.0",
+    "oxlint": "^1.74.0",
+    "typescript": "^7.0.2"
   },
-  "packageManager": "pnpm@11.1.3"
+  "packageManager": "pnpm@11.15.1"
 }
