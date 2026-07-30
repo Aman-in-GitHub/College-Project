@@ -74,6 +74,12 @@ type TableColumn = {
   isNullable: boolean;
 };
 
+type TableSummary = {
+  columnCount: number;
+  rowCount: number;
+  updatedAt: string | null;
+};
+
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type DuplicateReason = "existing_row" | "batch_duplicate" | null;
 type ImportPreviewRow = {
@@ -235,6 +241,27 @@ async function getDepartmentTableColumns(tableName: string): Promise<TableColumn
   `;
 
   return columns.filter((column) => !SYSTEM_TABLE_COLUMN_NAMES.has(column.columnName));
+}
+
+async function getDepartmentTableSummary(tableName: string): Promise<TableSummary> {
+  const [summary] = await postgresClient.unsafe<TableSummary[]>(
+    `SELECT
+      COUNT(*)::integer AS "rowCount",
+      MAX("updated_at")::text AS "updatedAt",
+      (
+        SELECT COUNT(*)::integer
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = ${toSqlLiteral(tableName)}
+          AND column_name NOT IN ('id', 'created_at', 'updated_at', 'department_id', 'created_by_user_id')
+      ) AS "columnCount"
+    FROM ${quoteTableIdentifier(tableName)}`,
+  );
+
+  if (!summary) {
+    throw new Error("Table summary was not found");
+  }
+
+  return summary;
 }
 
 function quoteTableIdentifier(tableName: string): string {
@@ -709,11 +736,12 @@ tableRoutes.get("/api/tables", requireDepartmentStaff, async (c) => {
           name: department.name,
           slug: department.slug,
         },
-        tables: tables.map((table: { tableName: string }) => ({
-          tableName: table.tableName.slice(prefix.length),
-          fullTableName: table.tableName,
-          href: `/${department.slug}/${table.tableName.slice(prefix.length)}`,
-        })),
+        tables: await Promise.all(
+          tables.map(async (table: { tableName: string }) => ({
+            tableName: table.tableName.slice(prefix.length),
+            ...(await getDepartmentTableSummary(table.tableName)),
+          })),
+        ),
       },
     },
     200,

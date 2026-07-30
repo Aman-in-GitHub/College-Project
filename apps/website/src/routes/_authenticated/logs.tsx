@@ -889,6 +889,7 @@ function RouteComponent() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead>Details</TableHead>
                       <TableHead>When</TableHead>
                       <TableHead>Action</TableHead>
                       <TableHead>Outcome</TableHead>
@@ -896,7 +897,6 @@ function RouteComponent() {
                       <TableHead>Actor</TableHead>
                       <TableHead>Department</TableHead>
                       <TableHead>Target</TableHead>
-                      <TableHead className="text-right">Details</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -906,6 +906,20 @@ function RouteComponent() {
                           key={item.id}
                           className={cn(selectedLogId === item.id && "bg-muted/60")}
                         >
+                          <TableCell>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setSelectedLogId((previous) =>
+                                  previous === item.id ? null : item.id,
+                                )
+                              }
+                            >
+                              <EyeIcon data-icon="inline-start" />
+                              View
+                            </Button>
+                          </TableCell>
                           <TableCell className="whitespace-nowrap">
                             {formatAuditDate(item.createdAt)}
                           </TableCell>
@@ -938,20 +952,6 @@ function RouteComponent() {
                                 row {item.rowId}
                               </span>
                             ) : null}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() =>
-                                setSelectedLogId((previous) =>
-                                  previous === item.id ? null : item.id,
-                                )
-                              }
-                            >
-                              <EyeIcon data-icon="inline-start" />
-                              View
-                            </Button>
                           </TableCell>
                         </TableRow>
                       ))

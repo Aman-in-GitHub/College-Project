@@ -165,8 +165,9 @@ type DepartmentTablesResponse = {
     };
     tables: Array<{
       tableName: string;
-      fullTableName: string;
-      href: string;
+      columnCount: number;
+      rowCount: number;
+      updatedAt: string | null;
     }>;
   };
 };
@@ -270,10 +271,21 @@ function isDepartmentTablesResponse(value: unknown): value is DepartmentTablesRe
       (table) =>
         isRecord(table) &&
         typeof table.tableName === "string" &&
-        typeof table.fullTableName === "string" &&
-        typeof table.href === "string",
+        typeof table.columnCount === "number" &&
+        typeof table.rowCount === "number" &&
+        (typeof table.updatedAt === "string" || table.updatedAt === null),
     )
   );
+}
+
+function formatTableUpdatedAt(updatedAt: string | null): string {
+  if (updatedAt === null) {
+    return "No rows yet";
+  }
+
+  const date = new Date(updatedAt);
+
+  return Number.isNaN(date.getTime()) ? "Recently updated" : `Updated ${date.toLocaleDateString()}`;
 }
 
 async function fetchManagedUsers(): Promise<ManagedUsersResponse> {
@@ -1106,7 +1118,7 @@ function RouteComponent() {
                     departmentTablesQuery.data.data.tables.length > 0 ? (
                     departmentTablesQuery.data.data.tables.map((table, index) => (
                       <motion.div
-                        key={table.fullTableName}
+                        key={table.tableName}
                         {...getEnterAnimationProps(isReducedMotion, index * 0.03, 8)}
                       >
                         <Link
@@ -1118,7 +1130,12 @@ function RouteComponent() {
                           className="block h-full border p-4 text-sm transition-colors hover:bg-muted"
                         >
                           <div className="font-medium">{table.tableName}</div>
-                          <div className="text-muted-foreground">{table.fullTableName}</div>
+                          <div className="mt-1 text-muted-foreground">
+                            {table.columnCount} columns · {table.rowCount} rows
+                          </div>
+                          <div className="text-muted-foreground">
+                            {formatTableUpdatedAt(table.updatedAt)}
+                          </div>
                         </Link>
                       </motion.div>
                     ))

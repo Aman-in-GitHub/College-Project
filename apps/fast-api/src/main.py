@@ -7,7 +7,7 @@ from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Literal, TypedDict
+from typing import Annotated, Literal, TypedDict
 
 import pandas as pd
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
@@ -101,7 +101,7 @@ def export_result_to_json(result: object, output_path: Path) -> object:
     save_to_json = getattr(result, "save_to_json", None)
 
     if not callable(save_to_json):
-        raise RuntimeError("PaddleOCR result does not expose save_to_json().")
+        raise TypeError("PaddleOCR result does not expose save_to_json().")
 
     save_to_json(str(output_path))
 
@@ -290,7 +290,7 @@ def infer_type_with_pandas(values: list[str]) -> str:
         dt = pd.to_datetime(s.astype(str), errors="coerce", utc=True)
         dt = dt.dt.tz_convert(None)
         dt_ratio = dt.notna().mean()
-    except Exception:
+    except (OverflowError, TypeError, ValueError):
         dt_ratio = 0
         dt = pd.Series(pd.NaT, index=s.index)
 
@@ -497,7 +497,8 @@ def extract_scanned_tables(file_bytes: bytes) -> list[dict[str, object]]:
 
 @app.post("/api/table/scan")
 async def scan_table(
-    file: UploadFile = File(...), x_internal_token: str | None = Header(default=None)
+    file: Annotated[UploadFile, File()],
+    x_internal_token: str | None = Header(default=None),
 ) -> dict[str, object]:
     if INTERNAL_TOKEN is None or INTERNAL_TOKEN.strip() == "":
         logger.error("FASTAPI_INTERNAL_TOKEN is not configured")
@@ -544,10 +545,8 @@ async def scan_table(
             "Invalid upload content filename=%s error=%s", file.filename, exc
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception(
-            "Table recognition failed filename=%s error=%s", file.filename, exc
-        )
+    except (OSError, RuntimeError, TypeError) as exc:
+        logger.exception("Table recognition failed filename=%s", file.filename)
         raise HTTPException(
             status_code=500,
             detail="Could not scan this table. Try a clearer image or try again.",
