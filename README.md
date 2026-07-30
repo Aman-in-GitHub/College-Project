@@ -2,25 +2,39 @@
 
 A full-stack document digitization system that converts paper tables from photos into structured PostgreSQL data. It uses a Python microservice with PaddleOCR and Gemini-based OCR flows to process scanned images. Scanned data can be reviewed before saving, imported into department tables with duplicate detection, edited through the dashboard, exported in formats like CSV, JSON, and XLSX and tracked through an audit log system with an admin-only logs page.
 
+### Login
+
+![Login](screenshots/0_login.png)
+
+### Admin Dashboard
+
+![Admin Dashboard](screenshots/1_admin.png)
+
+### Create Department Admin
+
+![Create Department Admin](screenshots/2_create.png)
+
+### Audit Logs
+
+![Audit Logs](screenshots/3_logs.png)
+
+### Department Dashboard
+
+![Department Dashboard](screenshots/4_department.png)
+
+### OCR Review
+
+![OCR Review](screenshots/5_ocr.png)
+
+### Table Data
+
+![Table Data](screenshots/6_table.png)
+
 ## Apps
 
 - `apps/website` - frontend built with React, Vite, and TanStack
-- `apps/backend` - backend built with Bun, Hono, Drizzle, and Better Auth
 - `apps/fast-api` - python microservice that runs PaddleOCR for table scanning
-
-## Tech Stack
-
-- `React`
-- `Vite`
-- `Bun`
-- `Hono`
-- `FastAPI`
-- `PaddleOCR`
-- `Google Gemini`
-- `Drizzle ORM`
-- `PostgreSQL`
-- `Zod`
-- `pnpm` workspaces
+- `apps/backend` - backend built with Bun, Hono, Drizzle, PostgreSQL, Redis, Google Gemini, and Better Auth
 
 ## Architecture
 
@@ -111,19 +125,8 @@ pnpm format
 pnpm update
 ```
 
-## Project Structure
-
-```text
-├── apps
-│   ├── backend
-│   ├── fast-api
-│   └── website
-├── package.json
-└── README.md
-```
-
 ## Team
 
 - [Aman Chand](https://github.com/Aman-in-GitHub)
 - [Raksha Karn](https://github.com/Raksha-Karn)
-- [Aayusha Dhakal](https://github.com/signup)
+- [Aayusha Dhakal](https://github.com)
