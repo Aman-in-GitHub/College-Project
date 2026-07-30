@@ -16,6 +16,7 @@ A full-stack document digitization system that converts paper tables from photos
 - `Hono`
 - `FastAPI`
 - `PaddleOCR`
+- `Google Gemini`
 - `Drizzle ORM`
 - `PostgreSQL`
 - `Zod`
@@ -61,7 +62,8 @@ flowchart LR
 
 - A `system_admin` creates department admins
 - A `department_admin` creates staff and manages department tables
-- Users scan paper tables from images using `PaddleOCR` or `Gemini`
+- Users choose `PaddleOCR` or `Gemini` to scan paper tables from images
+- Local CPU-based `PaddleOCR` supports English and Nepali
 - Scanned rows are reviewed and corrected before saving
 - New tables can be created from scanned schemas and data
 - Existing tables can import rows from images or CSV files

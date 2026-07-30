@@ -9,14 +9,15 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Annotated, Literal, TypedDict
 
+os.environ.setdefault("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", "False")
+os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+
 import pandas as pd
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from paddleocr import TableRecognitionPipelineV2
 from PIL import Image, ImageOps, UnidentifiedImageError
-
-os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
 CLIENT_URL = os.getenv("CLIENT_URL", "http://localhost:5173")
 INTERNAL_TOKEN = os.getenv("FASTAPI_INTERNAL_TOKEN")
