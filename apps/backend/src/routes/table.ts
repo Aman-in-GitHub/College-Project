@@ -50,7 +50,10 @@ const CREATE_TABLE_ROW_SCHEMA = z.object({
 
 const TABLE_SCAN_SOURCE_SCHEMA = z.object({
   source: z.enum(["gemini", "paddle"]).default("gemini"),
+  ocrLanguage: z.enum(["english", "nepali"]).default("english"),
 });
+
+type OcrLanguage = z.infer<typeof TABLE_SCAN_SOURCE_SCHEMA>["ocrLanguage"];
 
 const IMPORT_PREVIEW_ROW_SCHEMA = z.object({
   values: z.record(z.string(), z.string().nullable()),
@@ -659,6 +662,7 @@ async function buildImageImportPreview(params: {
   file: File;
   logger: AppEnv["Variables"]["logger"];
   source: "gemini" | "paddle";
+  ocrLanguage: OcrLanguage;
   tableName: string;
   normalizedDepartmentTableName: string;
   editableColumns: TableColumn[];
@@ -666,7 +670,11 @@ async function buildImageImportPreview(params: {
   const normalizedRows =
     params.source === "paddle"
       ? await (async () => {
-          const scannedTables = await scanTableImageWithPaddle(params.file, params.logger);
+          const scannedTables = await scanTableImageWithPaddle(
+            params.file,
+            params.logger,
+            params.ocrLanguage,
+          );
           const scanTable = selectBestMatchingScanTable(scannedTables, params.editableColumns);
 
           if (scanTable === null) {
@@ -1401,6 +1409,7 @@ tableRoutes.post(
       file,
       logger: reqLogger,
       source: parsedQuery.data.source,
+      ocrLanguage: parsedQuery.data.ocrLanguage,
       tableName,
       normalizedDepartmentTableName,
       editableColumns,
@@ -1882,7 +1891,7 @@ tableRoutes.post("/api/table/scan", requireDepartmentAdmin, photoUploadBodyLimit
 
   const tables =
     parsedQuery.data.source === "paddle"
-      ? await scanTableImageWithPaddle(file, reqLogger)
+      ? await scanTableImageWithPaddle(file, reqLogger, parsedQuery.data.ocrLanguage)
       : await scanTableImageWithGemini(file, reqLogger);
 
   reqLogger.info(

@@ -26,12 +26,22 @@ logger.setLevel(logging.INFO)
 
 DB_COLUMN_TYPES = ("text", "integer", "numeric", "boolean", "date", "time", "timestamp")
 PIPELINE_MODEL_NAMES = {
-    "wired_table_structure_recognition_model_name": "SLANeXt_wired",
-    "wireless_table_structure_recognition_model_name": "SLANeXt_wireless",
-    "wired_table_cells_detection_model_name": "RT-DETR-L_wired_table_cell_det",
-    "wireless_table_cells_detection_model_name": "RT-DETR-L_wireless_table_cell_det",
-    "text_detection_model_name": "PP-OCRv5_server_det",
-    "text_recognition_model_name": "PP-OCRv5_server_rec",
+    "english": {
+        "wired_table_structure_recognition_model_name": "SLANeXt_wired",
+        "wireless_table_structure_recognition_model_name": "SLANeXt_wireless",
+        "wired_table_cells_detection_model_name": "RT-DETR-L_wired_table_cell_det",
+        "wireless_table_cells_detection_model_name": "RT-DETR-L_wireless_table_cell_det",
+        "text_detection_model_name": "PP-OCRv6_medium_det",
+        "text_recognition_model_name": "PP-OCRv6_medium_rec",
+    },
+    "nepali": {
+        "wired_table_structure_recognition_model_name": "SLANeXt_wired",
+        "wireless_table_structure_recognition_model_name": "SLANeXt_wireless",
+        "wired_table_cells_detection_model_name": "RT-DETR-L_wired_table_cell_det",
+        "wireless_table_cells_detection_model_name": "RT-DETR-L_wireless_table_cell_det",
+        "text_detection_model_name": "PP-OCRv5_server_det",
+        "text_recognition_model_name": "devanagari_PP-OCRv5_mobile_rec",
+    },
 }
 SUPPORTED_CONTENT_TYPES = {
     "image/jpeg",
@@ -63,6 +73,7 @@ RESERVED_IDENTIFIERS = {
 DbColumnType = Literal[
     "text", "integer", "numeric", "boolean", "date", "time", "timestamp"
 ]
+OcrLanguage = Literal["english", "nepali"]
 
 
 class ParsedCell(TypedDict):
@@ -86,10 +97,14 @@ app.add_middleware(
 
 
 @lru_cache(maxsize=1)
-def get_pipeline() -> TableRecognitionPipelineV2:
-    logger.info("Initializing table recognition pipeline")
+def get_pipeline(ocr_language: OcrLanguage) -> TableRecognitionPipelineV2:
+    logger.info(
+        "Initializing table recognition pipeline language=%s device=cpu",
+        ocr_language,
+    )
     return TableRecognitionPipelineV2(
-        **PIPELINE_MODEL_NAMES,
+        **PIPELINE_MODEL_NAMES[ocr_language],
+        device="cpu",
         use_doc_orientation_classify=True,
         use_doc_unwarping=True,
         use_layout_detection=True,
@@ -455,8 +470,10 @@ def structure_html_table(html_content: str) -> dict[str, object] | None:
     return {"columns": columns}
 
 
-def extract_scanned_tables(file_bytes: bytes) -> list[dict[str, object]]:
-    pipeline = get_pipeline()
+def extract_scanned_tables(
+    file_bytes: bytes, ocr_language: OcrLanguage
+) -> list[dict[str, object]]:
+    pipeline = get_pipeline(ocr_language)
 
     with TemporaryDirectory() as temporary_directory:
         temporary_directory_path = Path(temporary_directory)
@@ -470,6 +487,7 @@ def extract_scanned_tables(file_bytes: bytes) -> list[dict[str, object]]:
             use_ocr_model=True,
             use_table_orientation_classify=True,
             use_ocr_results_with_table_cells=True,
+            text_det_limit_side_len=1536,
         )
         scanned_tables: list[dict[str, object]] = []
 
@@ -499,6 +517,7 @@ def extract_scanned_tables(file_bytes: bytes) -> list[dict[str, object]]:
 async def scan_table(
     file: Annotated[UploadFile, File()],
     x_internal_token: str | None = Header(default=None),
+    x_ocr_language: Annotated[OcrLanguage, Header()] = "english",
 ) -> dict[str, object]:
     if INTERNAL_TOKEN is None or INTERNAL_TOKEN.strip() == "":
         logger.error("FASTAPI_INTERNAL_TOKEN is not configured")
@@ -509,9 +528,10 @@ async def scan_table(
         raise HTTPException(status_code=401, detail="Unauthorized OCR request.")
 
     logger.info(
-        "Received table scan request filename=%s content_type=%s",
+        "Received table scan request filename=%s content_type=%s language=%s",
         file.filename,
         file.content_type,
+        x_ocr_language,
     )
     upload_suffix = Path(file.filename or "").suffix.lower()
 
@@ -539,7 +559,9 @@ async def scan_table(
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
     try:
-        tables = await run_in_threadpool(extract_scanned_tables, file_bytes)
+        tables = await run_in_threadpool(
+            extract_scanned_tables, file_bytes, x_ocr_language
+        )
     except ValueError as exc:
         logger.warning(
             "Invalid upload content filename=%s error=%s", file.filename, exc
@@ -553,7 +575,10 @@ async def scan_table(
         ) from exc
 
     logger.info(
-        "Completed table scan filename=%s table_count=%s", file.filename, len(tables)
+        "Completed table scan filename=%s table_count=%s language=%s",
+        file.filename,
+        len(tables),
+        x_ocr_language,
     )
 
     return {

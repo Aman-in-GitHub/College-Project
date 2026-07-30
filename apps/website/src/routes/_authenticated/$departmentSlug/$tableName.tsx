@@ -26,6 +26,7 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState, type ChangeEvent 
 import { buttonVariants, Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -41,7 +42,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { EXPORT_FILE_FORMATS } from "@/lib/constants";
+import { EXPORT_FILE_FORMATS, OCR_LANGUAGE_OPTIONS, type OcrLanguage } from "@/lib/constants";
 import { env } from "@/lib/env";
 import {
   buildExportFilename,
@@ -538,13 +539,14 @@ async function previewImageImport(params: {
   departmentSlug: string;
   tableName: string;
   file: File;
+  ocrLanguage: OcrLanguage;
   source: ImportSource;
 }): Promise<ImportPreviewResponse> {
   const formData = new FormData();
   formData.append("file", params.file, params.file.name);
 
   const { response, body } = await fetchApiJson(
-    `${env.VITE_SERVER_URL}/api/tables/${encodeURIComponent(params.tableName)}/import-image/preview?source=${encodeURIComponent(params.source)}`,
+    `${env.VITE_SERVER_URL}/api/tables/${encodeURIComponent(params.tableName)}/import-image/preview?source=${encodeURIComponent(params.source)}&ocrLanguage=${encodeURIComponent(params.ocrLanguage)}`,
     {
       method: "POST",
       headers: {
@@ -573,6 +575,7 @@ async function previewImageImportBatch(params: {
   departmentSlug: string;
   tableName: string;
   files: File[];
+  ocrLanguage: OcrLanguage;
   source: ImportSource;
 }): Promise<ImportPreviewBatchResponse> {
   const rows: ImportPreviewRow[] = [];
@@ -583,6 +586,7 @@ async function previewImageImportBatch(params: {
       departmentSlug: params.departmentSlug,
       tableName: params.tableName,
       file,
+      ocrLanguage: params.ocrLanguage,
       source: params.source,
     });
 
@@ -725,6 +729,7 @@ function RouteComponent() {
   const [importPreviewUrls, setImportPreviewUrls] = useState<string[]>([]);
   const [importPreviewRows, setImportPreviewRows] = useState<ImportPreviewRow[]>([]);
   const [importPreviewSource, setImportPreviewSource] = useState<ImportSource | null>(null);
+  const [ocrLanguage, setOcrLanguage] = useState<OcrLanguage>("english");
   const [isExportingAll, setIsExportingAll] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFileFormat>("xlsx");
   const [deletingRowId, setDeletingRowId] = useState<string | null>(null);
@@ -1145,6 +1150,7 @@ function RouteComponent() {
       departmentSlug: params.departmentSlug,
       tableName: params.tableName,
       files: selectedImportFiles,
+      ocrLanguage,
       source,
     });
   }
@@ -1324,7 +1330,7 @@ function RouteComponent() {
                   </div>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-4 md:grid-cols-4">
                   <div className="flex flex-col gap-2">
                     <label htmlFor="table-import-camera" className="text-sm font-medium">
                       <span className="mr-2 inline-flex align-middle">
@@ -1371,6 +1377,26 @@ function RouteComponent() {
                       accept=".csv,text/csv"
                       onChange={handleImportFileSelect}
                     />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="import-ocr-language">OCR language</Label>
+                    <Select
+                      items={OCR_LANGUAGE_OPTIONS}
+                      value={ocrLanguage}
+                      onValueChange={(value) => {
+                        if (value === "english" || value === "nepali") {
+                          setOcrLanguage(value);
+                        }
+                      }}
+                    >
+                      <SelectTrigger id="import-ocr-language" className="w-full sm:w-56">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="english">English</SelectItem>
+                        <SelectItem value="nepali">Nepali</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 

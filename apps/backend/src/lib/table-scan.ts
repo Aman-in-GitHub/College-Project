@@ -313,6 +313,7 @@ export async function scanExistingTableRowsWithGemini(params: {
 export async function scanTableImageWithPaddle(
   file: File,
   logger: Logger,
+  ocrLanguage: "english" | "nepali",
 ): Promise<ScannedTable[]> {
   const formData = new FormData();
   formData.append("file", file, file.name || "table-image");
@@ -321,6 +322,7 @@ export async function scanTableImageWithPaddle(
     method: "POST",
     headers: {
       "x-internal-token": env.FASTAPI_INTERNAL_TOKEN,
+      "x-ocr-language": ocrLanguage,
     },
     body: formData,
   });
@@ -349,6 +351,7 @@ export async function scanTableImageWithPaddle(
   logger.info(
     {
       tableCount: parsedResponse.data.data.tables.length,
+      ocrLanguage,
       detectedColumns: parsedResponse.data.data.tables.map((table, tableIndex) => ({
         table: tableIndex + 1,
         columns: table.columns.map((column) => ({

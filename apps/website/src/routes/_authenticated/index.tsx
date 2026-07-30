@@ -39,7 +39,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { authClient } from "@/lib/auth";
-import { FALLBACK_COLUMN_TYPES, SCROLL_DELAY_MS } from "@/lib/constants";
+import {
+  FALLBACK_COLUMN_TYPES,
+  OCR_LANGUAGE_OPTIONS,
+  SCROLL_DELAY_MS,
+  type OcrLanguage,
+} from "@/lib/constants";
 import { env } from "@/lib/env";
 import {
   fetchApiJson,
@@ -403,18 +408,20 @@ async function fetchDepartmentTables(departmentSlug: string): Promise<Department
 async function scanTableRequest({
   departmentSlug,
   file,
+  ocrLanguage,
   source,
   requestId: _requestId,
 }: {
   departmentSlug: string;
   file: File;
+  ocrLanguage: OcrLanguage;
   source: ScanSource;
   requestId: number;
 }): Promise<ScanResponse> {
   const formData = new FormData();
   formData.append("file", file, file.name);
   const { response, body } = await fetchApiJson(
-    `${env.VITE_SERVER_URL}/api/table/scan?source=${encodeURIComponent(source)}`,
+    `${env.VITE_SERVER_URL}/api/table/scan?source=${encodeURIComponent(source)}&ocrLanguage=${encodeURIComponent(ocrLanguage)}`,
     {
       method: "POST",
       headers: {
@@ -519,6 +526,7 @@ function RouteComponent() {
   const [tableName, setTableName] = useState("");
   const [isFillDataEnabled, setIsFillDataEnabled] = useState(true);
   const [activeScanSource, setActiveScanSource] = useState<ScanSource | null>(null);
+  const [ocrLanguage, setOcrLanguage] = useState<OcrLanguage>("english");
   const [customColumnName, setCustomColumnName] = useState("");
   const [customColumnType, setCustomColumnType] = useState<DbColumnType>("text");
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
@@ -772,6 +780,7 @@ function RouteComponent() {
     await scanMutation.mutateAsync({
       departmentSlug: department.slug,
       file: selectedFile,
+      ocrLanguage,
       source,
       requestId: ++scanRequestIdRef.current,
     });
@@ -1163,7 +1172,7 @@ function RouteComponent() {
                 <CardDescription>Choose one method: camera or upload.</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-3">
                   <div className="flex flex-col gap-2">
                     <Label htmlFor="camera-photo">Take Photo</Label>
                     <Input
@@ -1185,6 +1194,27 @@ function RouteComponent() {
                       accept="image/*"
                       onChange={onSelectFile}
                     />
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="ocr-language">OCR language</Label>
+                    <Select
+                      items={OCR_LANGUAGE_OPTIONS}
+                      value={ocrLanguage}
+                      onValueChange={(value) => {
+                        if (value === "english" || value === "nepali") {
+                          setOcrLanguage(value);
+                        }
+                      }}
+                    >
+                      <SelectTrigger id="ocr-language" className="w-full sm:w-56">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="english">English</SelectItem>
+                        <SelectItem value="nepali">Nepali</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 
